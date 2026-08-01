@@ -37,5 +37,12 @@ Rename the public product to Article Fit and bootstrap an invitation-only previe
 - [x] Public brand renamed to Article Fit.
 - [ ] Supabase project connected and verified.
 - [x] Private GitHub repository created, committed, pushed, and draft PR opened.
-- [ ] Vercel project linked; corrected monorepo preview deployment pending.
-- [ ] Preview smoke checks pass.
+- [x] Vercel project linked and corrected monorepo preview deployed in `gru1`.
+- [x] Preview page and `/api/health` smoke checks pass.
+
+## Validation record
+
+- Preview deployment: `dpl_A8z3m173eTuHF2d1kytAgwychrjD` (`READY`).
+- Public application shell and web health endpoint respond correctly.
+- Supabase Marketplace installation still reports no connected resource; browser authorization remains pending.
+- The processing API and worker are not deployed, so end-to-end manuscript analysis is not yet available in the hosted preview.
