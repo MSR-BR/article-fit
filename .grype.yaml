@@ -1,0 +1,20 @@
+# Temporary exceptions for CPython 3.13.14. Grype currently treats fixes that
+# exist only in Python 3.15 pre-release builds as actionable. Change 001 keeps a
+# stable runtime; remove each exception as soon as a stable supported release
+# contains its fix. Review deadline: 2026-08-31.
+ignore:
+  - vulnerability: CVE-2026-11940
+    package:
+      name: python
+      version: 3.13.14
+      type: binary
+  - vulnerability: CVE-2026-15308
+    package:
+      name: python
+      version: 3.13.14
+      type: binary
+  - vulnerability: CVE-2026-11972
+    package:
+      name: python
+      version: 3.13.14
+      type: binary

@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  static-security:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript,python
+      - uses: github/codeql-action/analyze@v3
+
+  web-and-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx prettier --check .
+      - run: npm run lint --workspaces --if-present
+      - run: npm run typecheck --workspaces --if-present
+      - run: npm run test --workspaces --if-present
+      - run: npm run build --workspaces --if-present
+      - run: npm run check:boundaries
+      - run: npm run check:secrets
+      - run: npm run audit:production
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+          cache: pip
+      - run: pip install --require-hashes -r requirements-dev.lock
+      - run: pip install --no-deps -e .
+      - run: ruff check apps tests
+      - run: ruff format --check apps tests
+      - run: mypy apps/api/src apps/worker/src
+      - run: pytest
+
+  infrastructure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose -f infra/containers/compose.yaml config --quiet
+      - run: npm run test:containers
+      - run: npm run scan:images

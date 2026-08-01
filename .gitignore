@@ -1,0 +1,26 @@
+.DS_Store
+.env
+.secrets/
+.next/
+node_modules/
+coverage/
+dist/
+*.tsbuildinfo
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.py[cod]
+.coverage
+htmlcov/
+.idea/
+.vscode/
+artifacts/
+uploads/
+tmp/
+outputs/
+
+# Internal validation builders can contain excerpts from private manuscripts.
+scripts/generate-validation-products.py
+scripts/generate-validation-products-v2.py

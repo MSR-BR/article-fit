@@ -1,0 +1,102 @@
+name: journal-matcher
+
+services:
+  web:
+    profiles: [application]
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - '3000:3000'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)})",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    profiles: [application]
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+      target: runtime
+    ports:
+      - '8000:8000'
+    environment:
+      JOURNAL_MATCHER_INVITE_TOKEN: ${JOURNAL_MATCHER_INVITE_TOKEN:-local-invite-token}
+      JOURNAL_MATCHER_PROVIDER_EMAIL: ${JOURNAL_MATCHER_PROVIDER_EMAIL:-}
+      JOURNAL_MATCHER_WEB_ORIGIN: ${JOURNAL_MATCHER_WEB_ORIGIN:-http://localhost:3000}
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker:
+    profiles: [application]
+    build:
+      context: ../..
+      dockerfile: apps/worker/Dockerfile
+
+  postgres:
+    image: postgres:17.5-alpine
+    environment:
+      POSTGRES_DB: journal_matcher
+      POSTGRES_USER: journal_matcher
+      POSTGRES_PASSWORD: local_only
+    ports:
+      - '5432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U journal_matcher -d journal_matcher']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:8.0.3-alpine
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - redis-data:/data
+
+  minio:
+    image: minio/minio:RELEASE.2025-07-23T15-54-02Z
+    command: ['server', '/data', '--console-address', ':9001']
+    environment:
+      MINIO_ROOT_USER: journal_matcher_local
+      MINIO_ROOT_PASSWORD: local_development_only
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - minio-data:/data
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:

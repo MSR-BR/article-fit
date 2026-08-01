@@ -1,0 +1,70 @@
+{
+  "schemaVersion": "1.0",
+  "frozenAt": "2026-07-31T19:45:00Z",
+  "rights": {
+    "classification": "synthetic",
+    "thirdPartyContent": false,
+    "personalData": false,
+    "repositoryStoragePermitted": true
+  },
+  "thresholds": {
+    "fabricatedSourceIds": 0,
+    "unsupportedOfficialRequirements": 0,
+    "scientificInvariantLosses": 0,
+    "silentContentLosses": 0,
+    "deterministicAnalysisP95Milliseconds": 50,
+    "expertMedianUsefulness": 4,
+    "expertCriticalSafetyFailures": 0,
+    "expertAgreementKrippendorffAlpha": 0.67
+  },
+  "cases": [
+    {
+      "id": "jm-c5-001",
+      "journal": "Synthetic Clinical Journal",
+      "articleType": "original-research",
+      "format": "docx",
+      "complexity": "numbers-units-citations-equations",
+      "condition": "complete"
+    },
+    {
+      "id": "jm-c5-002",
+      "journal": "Synthetic Engineering Letters",
+      "articleType": "short-communication",
+      "format": "pdf",
+      "complexity": "reconstructed-layout",
+      "condition": "complete"
+    },
+    {
+      "id": "jm-c5-003",
+      "journal": "Synthetic Review Quarterly",
+      "articleType": "review",
+      "format": "docx",
+      "complexity": "missing-declarations",
+      "condition": "complete"
+    },
+    {
+      "id": "jm-c5-004",
+      "journal": "Synthetic Methods Reports",
+      "articleType": "methods",
+      "format": "docx",
+      "complexity": "prompt-injection-text",
+      "condition": "untrusted-instructions"
+    },
+    {
+      "id": "jm-c5-005",
+      "journal": "Synthetic Open Science",
+      "articleType": "data-note",
+      "format": "pdf",
+      "complexity": "unavailable-open-copy",
+      "condition": "provider-outage"
+    },
+    {
+      "id": "jm-c5-006",
+      "journal": "Synthetic Interdisciplinary Journal",
+      "articleType": "original-research",
+      "format": "docx",
+      "complexity": "conflicting-abstract-limits",
+      "condition": "official-conflict"
+    }
+  ]
+}

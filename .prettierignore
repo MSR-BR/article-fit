@@ -1,0 +1,6 @@
+.next
+node_modules
+package-lock.json
+*.pdf
+*.docx
+apps/web/next-env.d.ts
