@@ -39,7 +39,7 @@ Replace the pilot's ephemeral SQLite/filesystem boundary with one secured Supaba
 ## Completion checklist
 
 - [x] Existing Supabase project connected to all three Vercel environments.
-- [ ] Hosted schema, RLS, buckets, and queue implemented and verified.
+- [x] Hosted schema, RLS, buckets, and queue implemented and verified.
 - [ ] Hosted Postgres/Storage adapter implemented and verified.
 - [ ] Durable API/worker deployment implemented and verified.
 - [x] Node.js 24 migration validated locally and on Vercel (`dpl_4dBcxAdMV6r9rhBo1YxtEgea62wV`).

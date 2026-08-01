@@ -1,6 +1,6 @@
 # Invitation-only pilot environment
 
-Status: partially provisioned; Vercel and Supabase are connected, while hosted Python compute and the database migration remain pending.
+Status: partially provisioned; Vercel, Supabase schema, RLS, private buckets, and queue are active, while hosted Python compute remains pending.
 
 ## Services
 
