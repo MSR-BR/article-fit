@@ -1,0 +1,12 @@
+.git
+.github
+.next
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.coverage
+node_modules
+tests
+docs
+work
+

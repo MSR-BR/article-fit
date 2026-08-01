@@ -1,6 +1,6 @@
 # Invitation-only pilot environment
 
-Status: design only; nothing has been provisioned.
+Status: partially provisioned; Vercel and Supabase are connected, while hosted Python compute and the database migration remain pending.
 
 ## Services
 

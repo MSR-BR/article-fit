@@ -1,6 +1,6 @@
 # ADR 0004: Proposed pilot hosting architecture
 
-- Status: proposed — requires owner approval before provisioning
+- Status: partially accepted — Vercel and the existing Supabase project are approved; Python compute remains pending
 - Date: 2026-07-31
 
 ## Context
@@ -20,7 +20,7 @@ The invitation-only pilot is expected to handle unpublished manuscripts and shou
 
 ### Supabase
 
-- Create one pilot project in `sa-east-1`.
+- Use the owner-approved pilot project `qbjhtdalhjcsmujntoni`; the owner explicitly chose one shared project for Production, Preview, and Development during this small controlled pilot.
 - Use Supabase Postgres for projects, journal profiles, evidence metadata, workflow state, recommendations, audit events, and artifact metadata.
 - Use Supabase Auth for named invitation-only users; remove the shared bearer token before pilot access.
 - Use two private Storage buckets: `manuscripts` and `artifacts`. Enforce 25 MB and PDF/DOCX MIME restrictions at bucket and application layers.

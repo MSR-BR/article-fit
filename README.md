@@ -6,7 +6,7 @@ Manuscript comparison, rewriting, and final export are deliberately not implemen
 
 ## Prerequisites
 
-- Node.js 20.20.2 and npm 10.x
+- Node.js 24.18.0 LTS and npm 10 or 11
 - Python 3.13.14 (or Docker for the Python services)
 - Docker with Compose for PostgreSQL, Redis, and MinIO
 
