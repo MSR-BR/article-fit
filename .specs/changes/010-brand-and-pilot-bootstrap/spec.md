@@ -36,6 +36,6 @@ Rename the public product to Article Fit and bootstrap an invitation-only previe
 
 - [x] Public brand renamed to Article Fit.
 - [ ] Supabase project connected and verified.
-- [ ] Private GitHub repository created, committed, and pushed.
-- [ ] Vercel project linked and preview deployed.
+- [x] Private GitHub repository created, committed, pushed, and draft PR opened.
+- [ ] Vercel project linked; corrected monorepo preview deployment pending.
 - [ ] Preview smoke checks pass.

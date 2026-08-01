@@ -24,3 +24,4 @@ outputs/
 # Internal validation builders can contain excerpts from private manuscripts.
 scripts/generate-validation-products.py
 scripts/generate-validation-products-v2.py
+.vercel
