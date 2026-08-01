@@ -1,0 +1,38 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: article-fit-api
+  labels:
+    app.kubernetes.io/name: article-fit
+    app.kubernetes.io/component: api
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "1"
+        run.googleapis.com/cpu-throttling: "true"
+        run.googleapis.com/startup-cpu-boost: "false"
+    spec:
+      containerConcurrency: 4
+      timeoutSeconds: 300
+      serviceAccountName: article-fit-api@article-fit-uff.iam.gserviceaccount.com
+      containers:
+        - image: us-east1-docker.pkg.dev/article-fit-uff/article-fit/api:IMAGE_TAG
+          ports:
+            - containerPort: 8000
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            failureThreshold: 12
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 30

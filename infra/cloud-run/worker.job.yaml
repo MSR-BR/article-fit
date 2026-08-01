@@ -1,0 +1,26 @@
+apiVersion: run.googleapis.com/v1
+kind: Job
+metadata:
+  name: article-fit-worker
+  labels:
+    app.kubernetes.io/name: article-fit
+    app.kubernetes.io/component: worker
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      taskCount: 1
+      template:
+        spec:
+          maxRetries: 2
+          timeoutSeconds: "3600"
+          serviceAccountName: article-fit-worker@article-fit-uff.iam.gserviceaccount.com
+          containers:
+            - image: us-east1-docker.pkg.dev/article-fit-uff/article-fit/worker:IMAGE_TAG
+              args: ["--process-batch", "--batch-size", "1"]
+              resources:
+                limits:
+                  cpu: "1"
+                  memory: 1Gi

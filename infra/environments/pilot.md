@@ -1,6 +1,7 @@
 # Invitation-only pilot environment
 
-Status: partially provisioned; Vercel, Supabase schema, RLS, private buckets, and queue are active, while hosted Python compute remains pending.
+Status: partially provisioned; Vercel, Supabase schema, RLS, private buckets, queue, and the dedicated
+Google Cloud project `article-fit-uff` are active. Hosted Python compute remains gated on persistence parity.
 
 ## Services
 
@@ -8,8 +9,8 @@ Status: partially provisioned; Vercel, Supabase schema, RLS, private buckets, an
 | --- | --- | --- | --- |
 | Next.js web/proxy | Vercel | `gru1` | invitation-only HTTPS |
 | Postgres/Auth/Queue/Storage | Supabase | `sa-east-1` | RLS/private buckets |
-| FastAPI | Fly.io (proposed) | `gru` | web-proxy/service access |
-| Python worker | Fly.io (proposed) | `gru` | no public ingress |
+| FastAPI | Google Cloud Run | `us-east1` | authenticated web-proxy/service access |
+| Python worker | Google Cloud Run Job | `us-east1` | no public ingress; bounded executions |
 
 ## Secret classes
 
@@ -29,7 +30,6 @@ Status: partially provisioned; Vercel, Supabase schema, RLS, private buckets, an
 
 ## Blocking items
 
-- Owner approval of providers, region, cost ceiling, and DPA/privacy terms.
 - Replacement of SQLite/local files and shared invitation token.
 - Durable workflow/queue implementation.
 - Real PRL assisted-guidance run and expert review of outputs.

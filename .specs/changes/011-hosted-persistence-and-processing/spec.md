@@ -45,3 +45,11 @@ Replace the pilot's ephemeral SQLite/filesystem boundary with one secured Supaba
 - [x] Node.js 24 migration validated locally and on Vercel (`dpl_4dBcxAdMV6r9rhBo1YxtEgea62wV`).
 - [ ] Synthetic hosted end-to-end run passes.
 - [ ] Rollback, retention, and deletion drills pass.
+
+## Implementation notes
+
+- Google Cloud project `article-fit-uff` is provisioned with institutional billing; deployment remains gated.
+- The server-only Supabase HTTP boundary and official `pgmq_public` queue contract are implemented and unit-tested.
+- Cloud Run API/Job manifests enforce zero minimum API instances, one maximum API instance, bounded worker
+  executions, separate service identities, and runtime-only secrets.
+- Hosted repository parity is still incomplete; no API/worker image may be deployed as production-ready yet.

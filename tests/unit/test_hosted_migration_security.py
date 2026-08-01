@@ -1,6 +1,7 @@
 from pathlib import Path
 
 MIGRATION = Path("db/migrations/0005_hosted_pilot_security.sql")
+QUEUE_MIGRATION = Path("db/migrations/0006_durable_queue_api.sql")
 
 
 def test_hosted_migration_keeps_storage_private_and_bounded() -> None:
@@ -42,3 +43,12 @@ def test_hosted_migration_creates_durable_queue_without_browser_grants() -> None
     assert "create extension if not exists pgmq;" in sql
     assert "pgmq.create('analysis_jobs')" in sql
     assert "grant" not in "\n".join(line for line in sql.splitlines() if "pgmq" in line).lower()
+
+
+def test_queue_rpc_is_service_role_only() -> None:
+    sql = QUEUE_MIGRATION.read_text().lower()
+
+    assert "security definer" not in sql
+    assert "pgmq_public.send(text,jsonb,integer)" in sql
+    assert "revoke execute on function pgmq_public.read(text, integer, integer) from public, anon, authenticated" in sql
+    assert "grant execute on function pgmq_public.delete(text, bigint) to service_role" in sql
