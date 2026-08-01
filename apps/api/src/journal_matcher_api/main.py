@@ -1,4 +1,4 @@
-"""Journal Matcher API foundation."""
+"""Article Fit API foundation."""
 
 from __future__ import annotations
 
@@ -19,6 +19,13 @@ from pydantic import BaseModel, Field
 
 from journal_matcher_api import __version__
 from journal_matcher_api.foundation import FoundationStore, Principal, validate_and_extract
+from journal_matcher_api.gemini import (
+    GeminiConfigurationError,
+    GeminiEditorialClient,
+    GeminiProviderError,
+    build_editorial_prompt,
+    proposals_as_recommendations,
+)
 from journal_matcher_api.journal_research import (
     ArticleCandidate,
     JournalProfileRepository,
@@ -28,6 +35,11 @@ from journal_matcher_api.journal_research import (
     make_evidence,
     select_articles,
     validate_public_https_url,
+)
+from journal_matcher_api.journal_resolution import (
+    JournalResolutionError,
+    discover_official_guidance,
+    resolve_openalex_sources,
 )
 from journal_matcher_api.manuscript_analysis import (
     AnalysisRepository,
@@ -61,6 +73,10 @@ class JournalConfirmation(BaseModel):
     official_domain: str = Field(alias="officialDomain", pattern=r"^[a-z0-9.-]+$")
 
 
+class JournalResolveRequest(BaseModel):
+    candidate: str = Field(min_length=2, max_length=300)
+
+
 class StartJob(BaseModel):
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=128)
 
@@ -89,6 +105,20 @@ class DecisionRequest(BaseModel):
     modified_text: str | None = Field(alias="modifiedText", default=None, max_length=20_000)
 
 
+class WorkflowRequest(BaseModel):
+    idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=128)
+    scope_url: str | None = Field(alias="scopeUrl", default=None, pattern=r"^https://")
+    guide_url: str | None = Field(alias="guideUrl", default=None, pattern=r"^https://")
+    scope_snapshot: str | None = Field(alias="scopeSnapshot", default=None, min_length=500, max_length=200_000)
+    guide_snapshot: str | None = Field(alias="guideSnapshot", default=None, min_length=500, max_length=200_000)
+
+    def has_assisted_guidance(self) -> bool:
+        values = (self.scope_url, self.guide_url, self.scope_snapshot, self.guide_snapshot)
+        if any(values) and not all(values):
+            raise HTTPException(status_code=422, detail="The complete assisted-guidance package is required")
+        return all(values)
+
+
 @lru_cache
 def get_store() -> FoundationStore:
     data_root = Path(os.getenv("JOURNAL_MATCHER_DATA_ROOT", "/tmp/journal-matcher"))
@@ -113,7 +143,7 @@ PrincipalDependency = Annotated[Principal, Depends(authenticate)]
 StoreDependency = Annotated[FoundationStore, Depends(get_store)]
 
 app = FastAPI(
-    title="Journal Matcher API",
+    title="Article Fit API",
     version=__version__,
     description="Invitation-only project and secure ingestion foundation.",
 )
@@ -129,6 +159,35 @@ app.add_middleware(
 @app.get("/health", response_model=HealthResponse, tags=["system"])
 async def health() -> HealthResponse:
     return HealthResponse(service="api", status="ok", version=__version__)
+
+
+@app.post("/v1/journals/resolve", tags=["journals"])
+async def resolve_journal(payload: JournalResolveRequest, principal: PrincipalDependency) -> dict[str, object]:
+    contact = os.getenv("JOURNAL_MATCHER_PROVIDER_EMAIL")
+    if not contact:
+        raise HTTPException(status_code=503, detail="Provider contact email is not configured")
+    client = PoliteHttpClient(contact)
+    query = urlencode({"search": payload.candidate, "filter": "type:journal", "per-page": "10", "mailto": contact})
+    try:
+        metadata = json.loads(client.get(f"https://api.openalex.org/sources?{query}"))
+        if not isinstance(metadata, dict):
+            raise JournalResolutionError("Journal metadata provider returned an invalid response")
+        journal = resolve_openalex_sources(payload.candidate, metadata)
+        homepage = client.get(journal.homepage_url, allowed_domain=journal.official_domain).decode(
+            "utf-8", errors="replace"
+        )
+        guidance = discover_official_guidance(journal.homepage_url, journal.official_domain, homepage)
+    except (json.JSONDecodeError, JournalResolutionError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from None
+    return {
+        "title": journal.title,
+        "issn": journal.issn,
+        "officialDomain": journal.official_domain,
+        "homepageUrl": journal.homepage_url,
+        "scopeUrl": guidance.scope_url,
+        "guideUrl": guidance.guide_url,
+        "evidence": {"provider": "OpenAlex", "sourceId": journal.source_id, "confidence": journal.confidence},
+    }
 
 
 @app.post("/v1/projects", status_code=201, tags=["projects"])
@@ -174,6 +233,103 @@ async def start_ingestion_job(
     store: StoreDependency,
 ) -> dict[str, object]:
     return store.start_job(principal, project_id, payload.idempotency_key)
+
+
+@app.post("/v1/projects/{project_id}/run", tags=["workflow"])
+async def run_project_workflow(
+    project_id: str,
+    payload: WorkflowRequest,
+    principal: PrincipalDependency,
+    store: StoreDependency,
+) -> dict[str, object]:
+    """Run the bounded MVP workflow from verified journal identity through artifacts."""
+    project = store.get_project(principal, project_id)
+    if {str(item.get("slot")) for item in cast(list[dict[str, object]], project["documents"])} != {
+        "manuscript",
+        "reference-1",
+        "reference-2",
+        "reference-3",
+    }:
+        raise HTTPException(status_code=409, detail="The complete upload package is required")
+    assisted = payload.has_assisted_guidance()
+    resolved: dict[str, object]
+    if assisted:
+        contact = os.getenv("JOURNAL_MATCHER_PROVIDER_EMAIL")
+        if not contact:
+            raise HTTPException(status_code=503, detail="Provider contact email is not configured")
+        client = PoliteHttpClient(contact)
+        query = urlencode(
+            {
+                "search": str(project["journalCandidate"]),
+                "filter": "type:journal",
+                "per-page": "10",
+                "mailto": contact,
+            }
+        )
+        try:
+            metadata = json.loads(client.get(f"https://api.openalex.org/sources?{query}"))
+            if not isinstance(metadata, dict):
+                raise JournalResolutionError("Journal metadata provider returned an invalid response")
+            identity = resolve_openalex_sources(str(project["journalCandidate"]), metadata)
+            validate_public_https_url(str(payload.scope_url), identity.official_domain)
+            validate_public_https_url(str(payload.guide_url), identity.official_domain)
+        except (json.JSONDecodeError, JournalResolutionError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        resolved = {
+            "title": identity.title,
+            "issn": identity.issn,
+            "officialDomain": identity.official_domain,
+            "homepageUrl": identity.homepage_url,
+            "scopeUrl": payload.scope_url,
+            "guideUrl": payload.guide_url,
+            "evidence": {"provider": "OpenAlex", "sourceId": identity.source_id, "confidence": identity.confidence},
+        }
+    else:
+        resolved = await resolve_journal(JournalResolveRequest(candidate=str(project["journalCandidate"])), principal)
+    store.confirm_journal(
+        principal,
+        project_id,
+        str(resolved["title"]),
+        str(resolved["issn"]),
+        str(resolved["officialDomain"]),
+    )
+    ingestion = store.start_job(principal, project_id, payload.idempotency_key)
+    research = await research_journal(
+        project_id,
+        ResearchRequest(
+            scopeUrl=str(resolved["scopeUrl"]),
+            guideUrl=str(resolved["guideUrl"]),
+            expectedProfileVersion=0,
+            scopeSnapshot=payload.scope_snapshot,
+            guideSnapshot=payload.guide_snapshot,
+            assistedCaptureConfirmed=assisted,
+        ),
+        principal,
+        store,
+    )
+    profile = research.get("profileVersion")
+    if not isinstance(profile, dict) or not profile.get("id"):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Journal research was incomplete; analysis cannot safely continue",
+                "limitations": research.get("limitations", []),
+                "warnings": research.get("warnings", []),
+            },
+        )
+    analysis = await create_analysis(project_id, AnalysisRequest(profileVersionId=str(profile["id"])), principal, store)
+    enriched = await create_ai_review(str(analysis["id"]), principal, store)
+    artifact_result = await generate_artifacts(str(analysis["id"]), principal, store)
+    return {
+        "state": "succeeded",
+        "stage": "artifacts-ready",
+        "journal": resolved,
+        "ingestion": ingestion,
+        "research": research,
+        "analysisId": analysis["id"],
+        "recommendationCount": len(cast(list[object], enriched["recommendations"])),
+        "artifacts": artifact_result["artifacts"],
+    }
 
 
 @app.get("/v1/jobs/{job_id}", tags=["jobs"])
@@ -519,6 +675,46 @@ async def get_analysis(analysis_id: str, principal: PrincipalDependency, store: 
     return repository.get(principal, analysis_id)
 
 
+@app.post("/v1/analyses/{analysis_id}/ai-review", tags=["analysis"])
+async def create_ai_review(
+    analysis_id: str, principal: PrincipalDependency, store: StoreDependency
+) -> dict[str, object]:
+    repository = AnalysisRepository(store.database_path)
+    repository.migrate()
+    analysis = repository.get(principal, analysis_id)
+    project = store.get_project(principal, str(analysis["projectId"]))
+    manuscript = store.manuscript_record(principal, str(analysis["projectId"]))
+    profiles = JournalProfileRepository(str(store.database_path))
+    profile = profiles.get(str(analysis["profileVersionId"]))
+    prompt, allowed_source_ids = build_editorial_prompt(
+        journal_title=str(cast(dict[str, object], project["journal"])["title"]),
+        manuscript_segments=cast(list[dict[str, object]], manuscript["segments"]),
+        profile_claims=cast(list[dict[str, object]], profile["claims"]),
+        official_rules=cast(list[dict[str, object]], analysis["rules"]),
+        deterministic_recommendations=cast(list[dict[str, object]], analysis["recommendations"]),
+    )
+    try:
+        result = GeminiEditorialClient().generate(prompt)
+        recommendations = proposals_as_recommendations(
+            result.response,
+            profile_version_id=str(analysis["profileVersionId"]),
+            allowed_source_ids=allowed_source_ids,
+        )
+    except GeminiConfigurationError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from None
+    except GeminiProviderError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from None
+    enriched = repository.add_ai_review(principal, analysis_id, recommendations, result.response.limitations)
+    store.audit(
+        principal,
+        "analysis.ai-review.completed",
+        "analysis",
+        analysis_id,
+        {"model": result.model, "proposalCount": str(len(recommendations))},
+    )
+    return enriched
+
+
 @app.post("/v1/analyses/{analysis_id}/recommendations/{recommendation_id}/decision", tags=["analysis"])
 async def decide_recommendation(
     analysis_id: str,
@@ -595,7 +791,7 @@ async def generate_artifacts(
         "9. Sources and reproducibility",
         f"Profile version: {analysis['profileVersionId']}; deterministic template: c4-standard-business-brief-1.",
     ]
-    report_pdf = create_pdf("Journal Matcher revision report", report_lines)
+    report_pdf = create_pdf("Article Fit revision report", report_lines)
     manifest_payload = {
         "schemaVersion": "1.0",
         "analysisId": analysis_id,

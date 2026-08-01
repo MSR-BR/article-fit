@@ -1,4 +1,4 @@
-# Journal Matcher — Specification System
+# Article Fit — Specification System
 
 Status: Changes 001–004 completed. Change 005 is in validation with external gates pending. Change 006 remains draft.
 

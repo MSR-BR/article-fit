@@ -1,6 +1,6 @@
-# Journal Matcher
+# Article Fit
 
-Journal Matcher is an evidence-first AI-assisted manuscript preparation project. Changes 001–003 provide runnable web, API, and worker foundations, an invitation-only local ingestion pilot, and evidence-backed journal research/profile creation. The research stage discovers three recent works by confirmed ISSN, seeks lawful open versions, snapshots official scope/author guidance, and publishes only complete, provenance-validated journal profiles.
+Article Fit is an evidence-first AI-assisted manuscript preparation project. Changes 001–003 provide runnable web, API, and worker foundations, an invitation-only local ingestion pilot, and evidence-backed journal research/profile creation. The research stage discovers three recent works by confirmed ISSN, seeks lawful open versions, snapshots official scope/author guidance, and publishes only complete, provenance-validated journal profiles.
 
 Manuscript comparison, rewriting, and final export are deliberately not implemented yet.
 

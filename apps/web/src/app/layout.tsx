@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import './styles.css';
 
 export const metadata: Metadata = {
-  title: 'Journal Matcher',
+  title: 'Article Fit',
   description: 'Prepare seu manuscrito para o padrão editorial da revista certa.',
 };
 

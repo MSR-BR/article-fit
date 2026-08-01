@@ -1,0 +1,35 @@
+# Invitation-only pilot environment
+
+Status: design only; nothing has been provisioned.
+
+## Services
+
+| Component | Proposed provider | Region | Exposure |
+| --- | --- | --- | --- |
+| Next.js web/proxy | Vercel | `gru1` | invitation-only HTTPS |
+| Postgres/Auth/Queue/Storage | Supabase | `sa-east-1` | RLS/private buckets |
+| FastAPI | Fly.io (proposed) | `gru` | web-proxy/service access |
+| Python worker | Fly.io (proposed) | `gru` | no public ingress |
+
+## Secret classes
+
+- Vercel server environment: API service URL, web session secrets, publishable Supabase configuration where needed.
+- API/worker secret store: Supabase server credential, Gemini key, Research Starter key, provider contact, signing secrets.
+- CI secret store: scoped deploy credentials only.
+- Never copy production secrets into repository files, preview logs, browser bundles, or build output.
+
+## Release sequence
+
+1. Provision staging resources and apply reviewed migrations.
+2. Run RLS and private-storage adversarial tests.
+3. Deploy immutable preview and run synthetic end-to-end tests.
+4. Exercise queue retry, worker crash, deletion, backup/restore, and provider outage.
+5. Promote the validated preview; do not rebuild for promotion.
+6. Observe pilot metrics and retain a tested rollback target.
+
+## Blocking items
+
+- Owner approval of providers, region, cost ceiling, and DPA/privacy terms.
+- Replacement of SQLite/local files and shared invitation token.
+- Durable workflow/queue implementation.
+- Real PRL assisted-guidance run and expert review of outputs.

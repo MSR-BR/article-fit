@@ -421,7 +421,7 @@ class PoliteHttpClient:
         request = Request(
             url,
             headers={
-                "User-Agent": f"JournalMatcher/0.1 (mailto:{self.contact_email})",
+                "User-Agent": f"ArticleFit/0.1 (mailto:{self.contact_email})",
                 "Accept": "application/json,text/html,application/pdf",
             },
         )

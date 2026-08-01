@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 from journal_matcher_api import main
 from journal_matcher_api.foundation import FoundationStore
+from journal_matcher_api.gemini import EditorialResponse, GeminiResult
 
 from tests.conftest import auth
 from tests.integration.test_journal_research_flow import FakeProvider, prepare_project
@@ -36,6 +37,42 @@ def test_analysis_review_artifacts_and_tenant_isolation(
     assert analysis["limitations"]
     assert analysis["rules"]
     recommendation = next(item for item in analysis["recommendations"] if item["scientificImpact"])
+
+    class FakeGemini:
+        def generate(self, prompt: str) -> GeminiResult:
+            assert "UNTRUSTED DATA" in prompt
+            return GeminiResult(
+                model="test-model",
+                response=EditorialResponse.model_validate(
+                    {
+                        "summary": "The manuscript needs a clearer editorial architecture.",
+                        "proposals": [
+                            {
+                                "anchor": "page:1",
+                                "category": "structure",
+                                "priority": "medium",
+                                "basis": "expert-suggestion",
+                                "originalText": "Synthetic article",
+                                "proposedText": "Synthetic article: central result",
+                                "rationale": "Foreground the principal result.",
+                                "action": "Revise the title after author verification.",
+                                "sourceIds": [],
+                                "scientificImpact": True,
+                                "authorValidationRequired": True,
+                            }
+                        ],
+                        "limitations": ["AI-assisted review requires author validation."],
+                    }
+                ),
+            )
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(main, "GeminiEditorialClient", FakeGemini)
+    ai_review = client.post(f"/v1/analyses/{analysis['id']}/ai-review", headers=auth())
+    assert ai_review.status_code == 200, ai_review.text
+    ai_analysis = ai_review.json()
+    assert any(item.get("origin") == "gemini-editorial-review" for item in ai_analysis["recommendations"])
+    assert "AI-assisted review requires author validation." in ai_analysis["limitations"]
 
     blocked = client.post(
         f"/v1/analyses/{analysis['id']}/recommendations/{recommendation['id']}/decision",
@@ -76,3 +113,72 @@ def test_analysis_review_artifacts_and_tenant_isolation(
     assert client.delete(f"/v1/projects/{project_id}", headers=auth()).status_code == 204
     assert not [path for path in store.object_root.rglob("*") if path.is_file()]
     assert client.get(f"/v1/analyses/{analysis['id']}", headers=auth()).status_code == 404
+
+
+def test_real_workflow_orchestrator_reaches_downloadable_artifacts(client: TestClient, monkeypatch) -> None:
+    class WorkflowProvider(FakeProvider):
+        def get(self, url: str, *, allowed_domain: str | None = None) -> bytes:
+            if "api.openalex.org/sources" in url:
+                return (
+                    b'{"results":[{"id":"https://openalex.org/S1","display_name":"Synthetic Journal",'
+                    b'"alternate_titles":[],"issn_l":"1234-567X","homepage_url":"https://example.org/home",'
+                    b'"type":"journal"}]}'
+                )
+            if url == "https://example.org/home":
+                return b'<a href="/scope">Aims and Scope</a><a href="/guide">Guide for Authors</a>'
+            if url in {"https://example.org/scope", "https://example.org/guide"}:
+                raise main.HTTPException(status_code=502, detail="Provider returned HTTP 403")
+            return super().get(url, allowed_domain=allowed_domain)
+
+    class WorkflowGemini:
+        def generate(self, prompt: str) -> GeminiResult:
+            assert "EVIDENCE_PACKAGE_JSON" in prompt
+            return GeminiResult(
+                model="test-model",
+                response=EditorialResponse.model_validate(
+                    {
+                        "summary": "Editorial review completed.",
+                        "proposals": [
+                            {
+                                "anchor": "paragraph:1",
+                                "category": "language",
+                                "priority": "low",
+                                "basis": "expert-suggestion",
+                                "originalText": "Synthetic manuscript",
+                                "proposedText": "Synthetic manuscript with a clearer central result.",
+                                "rationale": "Improve clarity.",
+                                "action": "Verify and revise the opening.",
+                                "sourceIds": [],
+                                "scientificImpact": False,
+                                "authorValidationRequired": False,
+                            }
+                        ],
+                        "limitations": ["AI-assisted editorial review."],
+                    }
+                ),
+            )
+
+    monkeypatch.setenv("JOURNAL_MATCHER_PROVIDER_EMAIL", "research@example.org")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(main, "PoliteHttpClient", WorkflowProvider)
+    monkeypatch.setattr(main, "GeminiEditorialClient", WorkflowGemini)
+    monkeypatch.setattr(main, "validate_public_https_url", lambda url, domain=None: None)
+    project_id = prepare_project(client)
+    response = client.post(
+        f"/v1/projects/{project_id}/run",
+        headers=auth(),
+        json={
+            "idempotencyKey": "workflow-test-001",
+            "scopeUrl": "https://example.org/scope",
+            "guideUrl": "https://example.org/guide",
+            "scopeSnapshot": "Official scope for the journal. " + "verified scope evidence " * 30,
+            "guideSnapshot": "Official author instructions. " + "verified author guidance " * 30,
+        },
+    )
+    assert response.status_code == 200, response.text
+    workflow = response.json()
+    assert workflow["state"] == "succeeded"
+    assert workflow["stage"] == "artifacts-ready"
+    assert len(workflow["artifacts"]) == 4
+    for kind in ("revised-manuscript.docx", "revised-manuscript.pdf", "revision-report.pdf"):
+        assert client.get(f"/v1/analyses/{workflow['analysisId']}/artifacts/{kind}", headers=auth()).status_code == 200

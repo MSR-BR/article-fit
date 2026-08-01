@@ -584,6 +584,27 @@ class AnalysisRepository:
             "createdAt": run["created_at"],
         }
 
+    def add_ai_review(
+        self,
+        principal: Principal,
+        analysis_id: str,
+        recommendations: list[dict[str, object]],
+        limitations: list[str],
+    ) -> dict[str, object]:
+        """Append an idempotent AI review to an existing workspace-scoped analysis."""
+        analysis = self.get(principal, analysis_id)
+        merged_limitations = list(dict.fromkeys([*analysis["limitations"], *limitations]))  # type: ignore[misc]
+        with closing(sqlite3.connect(self.database_path)) as connection, connection:
+            connection.executemany(
+                "INSERT OR IGNORE INTO recommendations VALUES (?, ?, ?)",
+                [(str(item["id"]), analysis_id, json.dumps(item, sort_keys=True)) for item in recommendations],
+            )
+            connection.execute(
+                "UPDATE analysis_runs SET limitations_json = ? WHERE id = ? AND workspace_id = ?",
+                (json.dumps(merged_limitations), analysis_id, principal.workspace_id),
+            )
+        return self.get(principal, analysis_id)
+
     def decide(
         self,
         principal: Principal,
@@ -702,7 +723,7 @@ def annotate_docx(original: bytes, recommendations: list[dict[str, object]]) -> 
     except (zipfile.BadZipFile, KeyError, UnicodeDecodeError) as error:
         raise HTTPException(status_code=422, detail="Original DOCX cannot be safely annotated") from error
 
-    notes = _word_paragraph("Journal Matcher — accepted and modified revision notes", color="2E74B5", bold=True)
+    notes = _word_paragraph("Article Fit — accepted and modified revision notes", color="2E74B5", bold=True)
     for item in recommendations:
         if item.get("decision") not in {"accepted", "modified"}:
             continue

@@ -2,7 +2,7 @@
 
 ## Product boundary
 
-Journal Matcher accepts a manuscript (`.docx` or text-extractable PDF), three user-supplied journal articles (PDF), and a confirmed target journal. It gathers traceable journal evidence, builds or improves a shared journal profile, analyzes the private manuscript, and exports a revised DOCX/PDF plus an evidence-backed revision report.
+Article Fit accepts a manuscript (`.docx` or text-extractable PDF), three user-supplied journal articles (PDF), and a confirmed target journal. It gathers traceable journal evidence, builds or improves a shared journal profile, analyzes the private manuscript, and exports a revised DOCX/PDF plus an evidence-backed revision report.
 
 ## Architectural principles
 
