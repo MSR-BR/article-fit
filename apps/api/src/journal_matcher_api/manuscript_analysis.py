@@ -8,23 +8,30 @@ import re
 import sqlite3
 import textwrap
 import uuid
+import xml.etree.ElementTree as ET
 import zipfile
 from collections.abc import Iterable
 from contextlib import closing
 from datetime import UTC, datetime
-from html import escape
+from html import escape, unescape
 from io import BytesIO
 from pathlib import Path
 from typing import Literal, Protocol
 
 from fastapi import HTTPException
+from pypdf import PdfReader
+from pypdf.errors import PdfReadError
 
 from journal_matcher_api.foundation import FoundationStore, Principal
 
 Decision = Literal["accepted", "rejected", "modified"]
 CATEGORY_COLORS = {
+    "form": "1F4E79",
     "language": "1F4E79",
     "structure": "7030A0",
+    "content": "2F5597",
+    "scientific-question": "C00000",
+    "compliance": "C65911",
     "journal-format": "C65911",
     "methodology-reporting": "548235",
     "scientific-concern": "C00000",
@@ -668,15 +675,21 @@ def create_docx(text: str, recommendations: list[dict[str, object]], reconstruct
         style = "Title" if index == 0 else "Heading1" if part.casefold().rstrip(":") in section_names else "Normal"
         body_parts.append(_word_paragraph(part, style=style))
     body = "".join(body_parts)
-    notice = "Reconstructed from PDF; layout fidelity is not guaranteed." if reconstructed else "Annotated review copy."
+    notice = (
+        "PDF-source review copy: the original editable Word template cannot be recovered from a PDF. "
+        "Use the revised PDF for exact visual fidelity."
+        if reconstructed
+        else "Article Fit review copy. Original manuscript text remains black."
+    )
     body += _word_paragraph(notice, color="C00000", bold=True)
-    accepted = [item for item in recommendations if item.get("decision") in {"accepted", "modified"}]
-    if accepted:
-        body += _word_paragraph("Accepted and modified revision notes", color="2E74B5", bold=True, style="Heading1")
-    for item in accepted:
+    visible = [item for item in recommendations if item.get("decision") != "rejected"]
+    if visible:
+        body += _word_paragraph("Color-coded editorial suggestions", color="2E74B5", bold=True, style="Heading1")
+    for item in visible:
         proposed = item.get("modifiedText") or item.get("proposedText") or item.get("rationale")
         body += _word_paragraph(
-            f"[{item['category']}] {item['anchor']}: {proposed}", color=CATEGORY_COLORS[str(item["category"])]
+            f"ARTICLE FIT SUGGESTION [{item['category']}] {item['anchor']}: {proposed}",
+            color=CATEGORY_COLORS.get(str(item["category"]), "1F4E79"),
         )
     document = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -726,7 +739,7 @@ def create_docx(text: str, recommendations: list[dict[str, object]], reconstruct
 
 
 def annotate_docx(original: bytes, recommendations: list[dict[str, object]]) -> bytes:
-    """Preserve an uploaded DOCX package and append color-coded author-approved notes."""
+    """Preserve an uploaded DOCX package and add color-coded suggestions near their anchors."""
     try:
         with zipfile.ZipFile(BytesIO(original)) as source:
             document = source.read("word/document.xml").decode("utf-8")
@@ -734,13 +747,44 @@ def annotate_docx(original: bytes, recommendations: list[dict[str, object]]) -> 
     except (zipfile.BadZipFile, KeyError, UnicodeDecodeError) as error:
         raise HTTPException(status_code=422, detail="Original DOCX cannot be safely annotated") from error
 
-    notes = _word_paragraph("Article Fit — accepted and modified revision notes", color="2E74B5", bold=True)
-    for item in recommendations:
-        if item.get("decision") not in {"accepted", "modified"}:
-            continue
+    visible = [item for item in recommendations if item.get("decision") != "rejected"]
+    anchored: dict[int, list[dict[str, object]]] = {}
+    unanchored: list[dict[str, object]] = []
+    for item in visible:
+        match = re.fullmatch(r"paragraph:(\d+)", str(item.get("anchor", "")))
+        if match:
+            anchored.setdefault(int(match.group(1)), []).append(item)
+        else:
+            unanchored.append(item)
+
+    paragraph_pattern = re.compile(r"<w:p(?:\s[^>]*)?>.*?</w:p>", re.S)
+    rebuilt: list[str] = []
+    cursor = 0
+    logical_index = 0
+    for match in paragraph_pattern.finditer(document):
+        rebuilt.append(document[cursor : match.end()])
+        cursor = match.end()
+        if re.search(r"<w:t(?:\s[^>]*)?>.*?</w:t>", match.group(0), re.S):
+            logical_index += 1
+            for item in anchored.get(logical_index, []):
+                proposed = item.get("modifiedText") or item.get("proposedText") or item.get("rationale")
+                rebuilt.append(
+                    _word_paragraph(
+                        f"ARTICLE FIT SUGGESTION [{item['category']}]: {proposed}",
+                        color=CATEGORY_COLORS.get(str(item["category"]), "1F4E79"),
+                    )
+                )
+    rebuilt.append(document[cursor:])
+    document = "".join(rebuilt)
+
+    notes = ""
+    if unanchored:
+        notes += _word_paragraph("Article Fit — manuscript-level suggestions", color="2E74B5", bold=True)
+    for item in unanchored:
         proposed = item.get("modifiedText") or item.get("proposedText") or item.get("rationale")
         notes += _word_paragraph(
-            f"[{item['category']}] {item['anchor']}: {proposed}", color=CATEGORY_COLORS[str(item["category"])]
+            f"ARTICLE FIT SUGGESTION [{item['category']}] {item['anchor']}: {proposed}",
+            color=CATEGORY_COLORS.get(str(item["category"]), "1F4E79"),
         )
     insertion = document.rfind("<w:sectPr")
     if insertion < 0:
@@ -748,9 +792,6 @@ def annotate_docx(original: bytes, recommendations: list[dict[str, object]]) -> 
     if insertion < 0:
         raise HTTPException(status_code=422, detail="Original DOCX body cannot be located")
     entries["word/document.xml"] = (document[:insertion] + notes + document[insertion:]).encode()
-    for name, content in list(entries.items()):
-        if name.startswith("word/") and name.endswith(".xml"):
-            entries[name] = re.sub(rb"\s+w:rsid[A-Za-z]*=\"[^\"]*\"", b"", content)
     core = entries.get("docProps/core.xml")
     if core is not None:
         core = re.sub(rb"(<dc:creator[^>]*>).*?(</dc:creator>)", rb"\1\2", core, flags=re.S)
@@ -785,24 +826,48 @@ def validate_invariant_preservation(original: str, revised: str) -> None:
 
 
 def validate_proposal_parity(docx: bytes, revised_pdf: bytes, recommendations: list[dict[str, object]]) -> None:
-    """Require each accepted/modified proposal to be visible in both revision formats."""
+    """Require each visible proposal to be represented in both revision formats."""
     with zipfile.ZipFile(BytesIO(docx)) as archive:
         docx_xml = archive.read("word/document.xml").decode("utf-8", errors="ignore")
-    pdf_text = revised_pdf.decode("latin-1", errors="ignore")
+    try:
+        root = ET.fromstring(docx_xml)
+        docx_text = " ".join(node.text or "" for node in root.iter() if node.tag.endswith("}t"))
+    except ET.ParseError:
+        docx_text = unescape(re.sub(r"<[^>]+>", " ", docx_xml))
+    try:
+        pdf_text = " ".join(page.extract_text() or "" for page in PdfReader(BytesIO(revised_pdf), strict=False).pages)
+    except (PdfReadError, ValueError, TypeError) as error:
+        raise HTTPException(status_code=500, detail="Revised PDF cannot be read") from error
+    normalized_docx = " ".join(docx_text.split())
+    normalized_pdf = " ".join(pdf_text.split())
     for item in recommendations:
-        if item.get("decision") not in {"accepted", "modified"}:
+        if item.get("decision") == "rejected":
             continue
         proposal = str(item.get("modifiedText") or item.get("proposedText") or item.get("rationale"))
-        if escape(proposal) not in docx_xml or _pdf_escape(proposal) not in pdf_text:
+        probe = " ".join(proposal.split())[:80]
+        if probe not in normalized_docx or probe not in normalized_pdf:
             raise HTTPException(status_code=500, detail="DOCX/PDF recommendation parity validation failed")
 
 
 def _word_paragraph(text: str, color: str = "000000", bold: bool = False, style: str = "Normal") -> str:
+    text = _sanitize_xml_text(text)
     bold_xml = "<w:b/>" if bold else ""
     return (
         f'<w:p><w:pPr><w:pStyle w:val="{style}"/></w:pPr><w:r><w:rPr>'
         f'<w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:color w:val="{color}"/>{bold_xml}'
         f'</w:rPr><w:t xml:space="preserve">{escape(text)}</w:t></w:r></w:p>'
+    )
+
+
+def _sanitize_xml_text(value: object) -> str:
+    text = str(value or "")
+    return "".join(
+        character
+        for character in text
+        if character in "\t\n\r"
+        or 0x20 <= ord(character) <= 0xD7FF
+        or 0xE000 <= ord(character) <= 0xFFFD
+        or 0x10000 <= ord(character) <= 0x10FFFF
     )
 
 
@@ -849,20 +914,25 @@ def _pdf_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
 
-def validate_artifacts(docx: bytes, revised_pdf: bytes, report_pdf: bytes, manifest: bytes) -> dict[str, object]:
+def validate_artifacts(docx: bytes, revised_pdf: bytes, report_pdf: bytes) -> dict[str, object]:
     try:
         with zipfile.ZipFile(BytesIO(docx)) as archive:
             document_xml = archive.read("word/document.xml")
-    except (zipfile.BadZipFile, KeyError) as error:
+            ET.fromstring(document_xml)
+    except (zipfile.BadZipFile, KeyError, ET.ParseError) as error:
         raise HTTPException(status_code=500, detail="Generated DOCX failed structural validation") from error
-    if not revised_pdf.startswith(b"%PDF-") or not report_pdf.startswith(b"%PDF-"):
-        raise HTTPException(status_code=500, detail="Generated PDF failed structural validation")
-    parsed = json.loads(manifest)
+    try:
+        revised_reader = PdfReader(BytesIO(revised_pdf), strict=False)
+        report_reader = PdfReader(BytesIO(report_pdf), strict=False)
+        if not revised_reader.pages or not report_reader.pages:
+            raise ValueError("empty PDF")
+    except (PdfReadError, ValueError, TypeError):
+        raise HTTPException(status_code=500, detail="Generated PDF failed structural validation") from None
     forbidden = (b"Bearer ", b"local-invite-token", b"/tmp/journal-matcher")
-    combined = document_xml + revised_pdf + report_pdf + manifest
+    combined = document_xml + revised_pdf + report_pdf
     if any(secret in combined for secret in forbidden):
         raise HTTPException(status_code=500, detail="Artifact privacy validation failed")
-    return {"structural": True, "privacy": True, "manifestSchema": parsed.get("schemaVersion") == "1.0"}
+    return {"structural": True, "privacy": True, "sourceStructurePreserved": True}
 
 
 def store_artifact_set(

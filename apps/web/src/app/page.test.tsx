@@ -10,13 +10,13 @@ function jsonResponse(value: unknown, status = 200) {
 }
 
 function completePackage() {
-  fireEvent.change(screen.getByLabelText('Revista-alvo'), {
+  fireEvent.change(screen.getByLabelText('Target journal'), {
     target: { value: 'Physical Review Letters' },
   });
-  fireEvent.change(screen.getByLabelText('ISSN da revista'), {
+  fireEvent.change(screen.getByLabelText('Journal ISSN'), {
     target: { value: '0031-9007' },
   });
-  fireEvent.change(screen.getByLabelText('Selecionar artigos'), {
+  fireEvent.change(screen.getByLabelText('Select articles'), {
     target: {
       files: [1, 2, 3].map(
         (index) =>
@@ -26,7 +26,7 @@ function completePackage() {
       ),
     },
   });
-  fireEvent.change(screen.getByLabelText('Selecionar manuscrito'), {
+  fireEvent.change(screen.getByLabelText('Select manuscript'), {
     target: {
       files: [
         new File(['draft'], 'artigo.docx', {
@@ -35,16 +35,16 @@ function completePackage() {
       ],
     },
   });
-  fireEvent.change(screen.getByLabelText('URL oficial do escopo'), {
+  fireEvent.change(screen.getByLabelText('Official Scope URL'), {
     target: { value: 'https://journals.aps.org/prl/about' },
   });
-  fireEvent.change(screen.getByLabelText('URL oficial do guia dos autores'), {
+  fireEvent.change(screen.getByLabelText('Official Guide for Authors URL'), {
     target: { value: 'https://journals.aps.org/prl/authors' },
   });
-  fireEvent.change(screen.getByLabelText('Texto da página de escopo'), {
+  fireEvent.change(screen.getByLabelText('Scope page text'), {
     target: { value: 'escopo oficial '.repeat(40) },
   });
-  fireEvent.change(screen.getByLabelText('Texto do guia dos autores'), {
+  fireEvent.change(screen.getByLabelText('Guide for Authors text'), {
     target: { value: 'orientação oficial '.repeat(40) },
   });
 }
@@ -55,34 +55,34 @@ describe('HomePage', () => {
   it('opens the MVP upload interface without a login gate', () => {
     render(<HomePage />);
     expect(
-      screen.getByRole('heading', { name: 'Do rascunho à submissão.' }),
+      screen.getByRole('heading', { name: 'From draft to submission.' }),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText('Revista-alvo')).toBeInTheDocument();
+    expect(screen.getByLabelText('Target journal')).toBeInTheDocument();
     expect(screen.queryByText(/Acesso ao Article Fit/)).not.toBeInTheDocument();
   });
   it('shows the manuscript, references, and required official guidance', () => {
     render(<HomePage />);
 
     expect(
-      screen.getByRole('heading', { name: 'Do rascunho à submissão.' }),
+      screen.getByRole('heading', { name: 'From draft to submission.' }),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText('Selecionar artigos')).toHaveAttribute(
+    expect(screen.getByLabelText('Select articles')).toHaveAttribute(
       'multiple',
     );
-    expect(screen.getByLabelText('Selecionar manuscrito')).not.toHaveAttribute(
+    expect(screen.getByLabelText('Select manuscript')).not.toHaveAttribute(
       'multiple',
     );
-    expect(screen.getByLabelText('Revista-alvo')).toBeRequired();
-    expect(screen.getByLabelText('ISSN da revista')).toBeRequired();
-    expect(screen.getByLabelText('URL oficial do escopo')).toBeRequired();
+    expect(screen.getByLabelText('Target journal')).toBeRequired();
+    expect(screen.getByLabelText('Journal ISSN')).toBeRequired();
+    expect(screen.getByLabelText('Official Scope URL')).toBeRequired();
     expect(
-      screen.getByLabelText('URL oficial do guia dos autores'),
+      screen.getByLabelText('Official Guide for Authors URL'),
     ).toBeRequired();
     expect(
-      screen.getByRole('button', { name: 'Iniciar análise' }),
+      screen.getByRole('button', { name: 'Start analysis' }),
     ).toBeDisabled();
     expect(screen.getByRole('status')).toHaveTextContent(
-      'Informe a revista-alvo',
+      'Enter the target journal',
     );
   });
 
@@ -108,36 +108,38 @@ describe('HomePage', () => {
     render(<HomePage />);
     completePackage();
 
-    const startButton = screen.getByRole('button', { name: 'Iniciar análise' });
+    const startButton = screen.getByRole('button', { name: 'Start analysis' });
     expect(startButton).toBeEnabled();
     fireEvent.click(startButton);
-    expect(screen.getByRole('status')).toHaveTextContent('Análise iniciada');
+    expect(screen.getByRole('status')).toHaveTextContent('Analysis started');
     expect(
-      screen.getByRole('dialog', { name: 'Preparando seu artigo' }),
+      screen.getByRole('dialog', { name: 'Preparing your manuscript' }),
     ).toBeInTheDocument();
     expect(
       screen
-        .getByRole('heading', { name: 'Preparando seu artigo' })
+        .getByRole('heading', { name: 'Preparing your manuscript' })
         .querySelector('.spinner'),
     ).toBeInTheDocument();
-    expect(screen.getByText('Criando o projeto').closest('li')).toHaveClass(
-      'active',
-    );
+    expect(
+      screen.getByText('Creating the analysis workspace').closest('li'),
+    ).toHaveClass('active');
     await waitFor(() =>
       expect(
         screen
-          .getByText('Gerando e validando os arquivos finais')
+          .getByText('Generating and validating deliverables')
           .closest('li'),
       ).toHaveClass('complete'),
     );
     expect(
-      screen.getByRole('link', { name: /Relatório de adequação/ }),
+      screen.getByRole('link', { name: /Submission-fit report/ }),
     ).toHaveAttribute(
       'href',
       '/api/journal-matcher/analyses/analysis-1/artifacts/revision-report.pdf',
     );
     expect(
-      screen.getByRole('link', { name: /Artigo revisado \(Word\)/ }),
+      screen.getByRole('link', {
+        name: /Color-coded manuscript review \(Word\)/,
+      }),
     ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(6);
     expect(
@@ -177,16 +179,16 @@ describe('HomePage', () => {
     render(<HomePage />);
     completePackage();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Iniciar análise' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start analysis' }));
 
     expect(
-      await screen.findByRole('link', { name: /Relatório de adequação/ }),
+      await screen.findByRole('link', { name: /Submission-fit report/ }),
     ).toHaveAttribute(
       'href',
       '/api/journal-matcher/analyses/analysis-async/artifacts/revision-report.pdf',
     );
     expect(
-      screen.getByRole('dialog', { name: 'Arquivos prontos' }),
+      screen.getByRole('dialog', { name: 'Files ready' }),
     ).toBeInTheDocument();
     expect(screen.getByRole('progressbar')).toHaveAttribute(
       'aria-valuenow',
@@ -221,22 +223,22 @@ describe('HomePage', () => {
     render(<HomePage />);
     completePackage();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Iniciar análise' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start analysis' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Aguarde alguns minutos e tente novamente',
+      'Wait a few minutes and try again',
     );
     expect(screen.getByRole('alert')).not.toHaveTextContent('workflow-502');
     expect(screen.getByRole('alert')).not.toHaveTextContent('provedor de IA');
     expect(
-      screen.getByRole('dialog', { name: 'Análise interrompida' }),
+      screen.getByRole('dialog', { name: 'Analysis stopped' }),
     ).toBeInTheDocument();
     expect(screen.queryByText('Continuar em segundo plano')).toBeNull();
     expect(document.querySelector('.spinner')).toBeNull();
     expect(document.querySelector('.step-spinner')).toBeNull();
   });
 
-  it('shows approximate progress and a live description while running', () => {
+  it('shows milestone-based progress and one confirmed activity while running', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(() => new Promise<Response>(() => {})),
@@ -244,12 +246,12 @@ describe('HomePage', () => {
     render(<HomePage />);
     completePackage();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Iniciar análise' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start analysis' }));
 
     expect(
-      screen.getByText(/Progresso geral: aproximadamente 2%/),
+      screen.getByText(/Estimated milestone completion: 2%/),
     ).toBeInTheDocument();
-    expect(screen.getByText('Agora:')).toBeInTheDocument();
+    expect(screen.getByText('Current confirmed stage:')).toBeInTheDocument();
     expect(screen.getByRole('progressbar')).toHaveAttribute(
       'aria-valuenow',
       '2',
@@ -279,7 +281,7 @@ describe('HomePage', () => {
     render(<HomePage />);
     completePackage();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Iniciar análise' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start analysis' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(7));
     expect(screen.getByRole('progressbar')).toHaveAttribute(
@@ -287,7 +289,7 @@ describe('HomePage', () => {
       '25',
     );
     expect(
-      screen.getByText(/Progresso geral: aproximadamente 25%/),
+      screen.getByText(/Estimated milestone completion: 25%/),
     ).toBeInTheDocument();
   });
 
@@ -308,17 +310,15 @@ describe('HomePage', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<HomePage />);
     completePackage();
-    fireEvent.click(screen.getByRole('button', { name: 'Iniciar análise' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start analysis' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(7));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Parar análise' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Stop analysis' }));
 
     expect(
-      await screen.findByRole('dialog', { name: 'Análise interrompida' }),
+      await screen.findByRole('dialog', { name: 'Analysis stopped' }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(/Nenhum arquivo final foi gerado/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/No final file was generated/)).toBeInTheDocument();
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         '/api/journal-matcher/jobs/job-stop/cancel',
@@ -333,28 +333,30 @@ describe('HomePage', () => {
     completePackage();
     expect(screen.getByText('referencia-1.pdf')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Limpar campos' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reset form' }));
 
-    expect(screen.getByLabelText('Revista-alvo')).toHaveValue('');
-    expect(screen.getByLabelText('ISSN da revista')).toHaveValue('');
-    expect(screen.getByLabelText('URL oficial do escopo')).toHaveValue('');
+    expect(screen.getByLabelText('Target journal')).toHaveValue('');
+    expect(screen.getByLabelText('Journal ISSN')).toHaveValue('');
+    expect(screen.getByLabelText('Official Scope URL')).toHaveValue('');
     expect(screen.queryByText('referencia-1.pdf')).toBeNull();
     expect(
-      screen.getByRole('button', { name: 'Iniciar análise' }),
+      screen.getByRole('button', { name: 'Start analysis' }),
     ).toBeDisabled();
   });
 
   it('asks for the remaining orientation articles', () => {
     render(<HomePage />);
     completePackage();
-    fireEvent.change(screen.getByLabelText('Selecionar artigos'), {
+    fireEvent.change(screen.getByLabelText('Select articles'), {
       target: {
         files: [
           new File(['pdf'], 'referencia.pdf', { type: 'application/pdf' }),
         ],
       },
     });
-    expect(screen.getByRole('status')).toHaveTextContent('mais 2 artigos');
+    expect(screen.getByRole('status')).toHaveTextContent(
+      '2 more reference articles',
+    );
   });
 
   it('keeps analysis disabled until the target journal is informed', () => {
@@ -363,19 +365,19 @@ describe('HomePage', () => {
       (index) =>
         new File(['pdf'], `r-${index}.pdf`, { type: 'application/pdf' }),
     );
-    fireEvent.change(screen.getByLabelText('Selecionar artigos'), {
+    fireEvent.change(screen.getByLabelText('Select articles'), {
       target: { files: references },
     });
-    fireEvent.change(screen.getByLabelText('Selecionar manuscrito'), {
+    fireEvent.change(screen.getByLabelText('Select manuscript'), {
       target: {
         files: [new File(['draft'], 'artigo.pdf', { type: 'application/pdf' })],
       },
     });
     expect(
-      screen.getByRole('button', { name: 'Iniciar análise' }),
+      screen.getByRole('button', { name: 'Start analysis' }),
     ).toBeDisabled();
     expect(screen.getByRole('status')).toHaveTextContent(
-      'Informe a revista-alvo',
+      'Enter the target journal',
     );
   });
 
@@ -392,20 +394,20 @@ describe('HomePage', () => {
     );
     render(<HomePage />);
     completePackage();
-    fireEvent.click(screen.getByRole('button', { name: 'Iniciar análise' }));
-    expect(screen.getByText('Criando o projeto').closest('li')).toHaveClass(
-      'active',
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Start analysis' }));
     expect(
-      screen.getByText('Enviando e validando os arquivos').closest('li'),
+      screen.getByText('Creating the analysis workspace').closest('li'),
+    ).toHaveClass('active');
+    expect(
+      screen.getByText('Uploading and validating files').closest('li'),
     ).not.toHaveClass('active');
     expect(
-      screen.queryByRole('link', { name: /Baixar/ }),
+      screen.queryByRole('link', { name: /Download/ }),
     ).not.toBeInTheDocument();
     resolveProject(jsonResponse({ id: 'project-1' }));
     await waitFor(() =>
       expect(
-        screen.getByText('Enviando e validando os arquivos').closest('li'),
+        screen.getByText('Uploading and validating files').closest('li'),
       ).toHaveClass('active'),
     );
   });
@@ -416,43 +418,40 @@ describe('HomePage', () => {
       vi
         .fn()
         .mockResolvedValue(
-          jsonResponse(
-            { detail: 'Não foi possível confirmar a revista.' },
-            422,
-          ),
+          jsonResponse({ detail: 'The journal could not be confirmed.' }, 422),
         ),
     );
     render(<HomePage />);
     completePackage();
-    fireEvent.click(screen.getByRole('button', { name: 'Iniciar análise' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start analysis' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Revise os campos e os arquivos enviados',
+      'Review the fields and uploaded files',
     );
     expect(
-      screen.getByRole('button', { name: 'Iniciar análise' }),
+      screen.getByRole('button', { name: 'Start analysis' }),
     ).toBeEnabled();
     expect(
-      screen.queryByRole('link', { name: /Baixar/ }),
+      screen.queryByRole('link', { name: /Download/ }),
     ).not.toBeInTheDocument();
   });
 
   it('requires a complete official-guidance package', () => {
     render(<HomePage />);
     completePackage();
-    fireEvent.change(screen.getByLabelText('Texto do guia dos autores'), {
+    fireEvent.change(screen.getByLabelText('Guide for Authors text'), {
       target: { value: '' },
     });
     expect(
-      screen.getByRole('button', { name: 'Iniciar análise' }),
+      screen.getByRole('button', { name: 'Start analysis' }),
     ).toBeDisabled();
     expect(screen.getByRole('status')).toHaveTextContent(
-      'Complete o Scope e o Guide for Authors',
+      'Complete the Scope and Guide for Authors',
     );
-    fireEvent.change(screen.getByLabelText('Texto do guia dos autores'), {
+    fireEvent.change(screen.getByLabelText('Guide for Authors text'), {
       target: { value: 'orientação oficial '.repeat(40) },
     });
     expect(
-      screen.getByRole('button', { name: 'Iniciar análise' }),
+      screen.getByRole('button', { name: 'Start analysis' }),
     ).toBeEnabled();
   });
 });

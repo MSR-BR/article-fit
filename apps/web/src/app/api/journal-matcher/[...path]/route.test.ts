@@ -64,7 +64,7 @@ describe('journal matcher server proxy', () => {
     );
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toEqual({
-      detail: 'O serviço de análise não está disponível.',
+      detail: 'The analysis service is unavailable.',
     });
   });
 

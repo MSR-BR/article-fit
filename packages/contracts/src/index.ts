@@ -154,12 +154,7 @@ export const analysisResultSchema = z.object({
 
 export const artifactSchema = z.object({
   artifactId: opaqueIdSchema,
-  kind: z.enum([
-    'revised-docx',
-    'revised-pdf',
-    'revision-report',
-    'provenance-manifest',
-  ]),
+  kind: z.enum(['revised-docx', 'revised-pdf', 'revision-report']),
   state: z.enum(['pending', 'valid', 'invalid']),
   contentHash: z
     .string()

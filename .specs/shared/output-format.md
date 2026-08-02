@@ -7,9 +7,10 @@ Each completed job produces:
 1. `revised-manuscript.docx` — editable proposed revision with visible color-coded changes and comments/annotations.
 2. `revised-manuscript.pdf` — stable review rendering of the same proposed revision.
 3. `revision-report.pdf` — complete recommendation ledger and compliance report.
-4. `provenance-manifest.json` — machine-readable sources, versions, hashes, model/template identifiers, and validation results.
 
-The original input remains downloadable unchanged while retained. If the input is PDF-only and faithful editable reconstruction is not possible, the system must warn the user and label the DOCX as reconstructed.
+Source provenance, model identifiers, content hashes, and validation metadata remain internal. They are not exposed as an end-user download.
+
+For a PDF input, the revised PDF retains every original page unchanged and interleaves color-coded suggestion pages. If faithful editable reconstruction is not possible, the system must warn the user and label the DOCX as reconstructed. For a DOCX input, the original package and visual system control the revised Word document.
 
 ## Change categories and colors
 
@@ -53,7 +54,7 @@ Every change has:
 
 ## Integrity requirements
 
-- DOCX and PDF convey the same accepted proposal set.
+- DOCX and PDF convey the same visible proposal set, including pending suggestions and excluding rejected items.
 - Headings, tables, figures, equations, citations, cross-references, footnotes, and supplementary references are preserved or explicitly flagged.
 - Page/paragraph locators in the report resolve to the output and, where possible, the original.
 - No internal prompts, credentials, private storage URLs, or other users’ content appear in artifacts.

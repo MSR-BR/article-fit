@@ -89,12 +89,11 @@ def test_analysis_review_artifacts_and_tenant_isolation(
 
     generated = client.post(f"/v1/analyses/{analysis['id']}/artifacts", headers=auth())
     assert generated.status_code == 201, generated.text
-    assert len(generated.json()["artifacts"]) == 4
+    assert len(generated.json()["artifacts"]) == 3
     for kind, signature in (
         ("revised-manuscript.docx", b"PK"),
         ("revised-manuscript.pdf", b"%PDF-"),
         ("revision-report.pdf", b"%PDF-"),
-        ("provenance-manifest.json", b"{"),
     ):
         download = client.get(f"/v1/analyses/{analysis['id']}/artifacts/{kind}", headers=auth())
         assert download.status_code == 200
@@ -186,7 +185,7 @@ def test_real_workflow_orchestrator_reaches_downloadable_artifacts(
     workflow = response.json()
     assert workflow["state"] == "succeeded"
     assert workflow["stage"] == "artifacts-ready"
-    assert len(workflow["artifacts"]) == 4
+    assert len(workflow["artifacts"]) == 3
     assert openalex_calls == []
     assert (
         store.get_project(Principal("invited-pilot-user", "11111111-1111-4111-8111-111111111111"), project_id)[

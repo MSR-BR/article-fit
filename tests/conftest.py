@@ -42,7 +42,8 @@ def synthetic_docx() -> bytes:
     with zipfile.ZipFile(stream, "w") as archive:
         archive.writestr(
             "word/document.xml",
-            "<w:document><w:body><w:p><w:r><w:t>"
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'
+            "<w:p><w:r><w:t>"
             + ("Synthetic manuscript methods and results. " * 30)
             + "</w:t></w:r></w:p></w:body></w:document>",
         )

@@ -6,7 +6,7 @@ async function authenticationHeaders(): Promise<Headers | NextResponse> {
   const inviteToken = process.env.JOURNAL_MATCHER_INVITE_TOKEN;
   if (process.env.VERCEL_ENV === 'production' && !inviteToken) {
     return NextResponse.json(
-      { detail: 'A conexão interna com o serviço não está configurada.' },
+      { detail: 'The internal analysis-service connection is not configured.' },
       { status: 503 },
     );
   }
@@ -56,7 +56,7 @@ async function proxy(
     });
   } catch {
     return NextResponse.json(
-      { detail: 'O serviço de análise não está disponível.' },
+      { detail: 'The analysis service is unavailable.' },
       { status: 503 },
     );
   }

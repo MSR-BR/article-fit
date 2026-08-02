@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import json
 import zipfile
 from io import BytesIO
 
 import pytest
 from fastapi import HTTPException
+from journal_matcher_api.artifact_rendering import create_editorial_report_pdf, create_pdf_review_copy
 from journal_matcher_api.manuscript_analysis import (
     annotate_docx,
     build_recommendations,
@@ -17,6 +17,7 @@ from journal_matcher_api.manuscript_analysis import (
     validate_invariant_preservation,
     validate_proposal_parity,
 )
+from pypdf import PdfReader
 
 
 def test_extracts_provenanced_rules_and_marks_conflicts() -> None:
@@ -85,14 +86,13 @@ def test_artifact_bundle_is_structurally_valid_and_private() -> None:
     assert "1F4E79" in xml
     revised_pdf = create_pdf("Revised", ["Original manuscript."])
     report_pdf = create_pdf("Report", ["No acceptance guarantee."])
-    manifest = json.dumps({"schemaVersion": "1.0"}).encode()
-    assert validate_artifacts(docx, revised_pdf, report_pdf, manifest) == {
+    assert validate_artifacts(docx, revised_pdf, report_pdf) == {
         "structural": True,
         "privacy": True,
-        "manifestSchema": True,
+        "sourceStructurePreserved": True,
     }
     with pytest.raises(HTTPException, match="privacy"):
-        validate_artifacts(docx, revised_pdf, report_pdf, b'{"schemaVersion":"1.0","token":"Bearer secret"}')
+        validate_artifacts(docx, revised_pdf, report_pdf + b"Bearer secret")
 
 
 def test_annotation_preserves_original_docx_and_scientific_invariants() -> None:
@@ -145,3 +145,57 @@ def test_annotation_preserves_complex_parts_and_scrubs_personal_metadata() -> No
         assert archive.read("word/footnotes.xml").startswith(b"<w:footnotes")
         assert b"Private Author" not in archive.read("docProps/core.xml")
         assert "docProps/custom.xml" not in archive.namelist()
+
+
+def test_pdf_review_retains_source_page_and_adds_pending_suggestion_page() -> None:
+    source = create_pdf("Original template", ["Original black manuscript text."])
+    recommendation = {
+        "category": "language",
+        "anchor": "page:1",
+        "severity": "recommended",
+        "basis": "expert-suggestion",
+        "decision": "pending",
+        "originalText": "Original black manuscript text.",
+        "proposedText": "Suggested blue manuscript text.",
+        "rationale": "Make the result more direct.",
+    }
+    reviewed = create_pdf_review_copy(
+        original_pdf=source,
+        manuscript_title="Original template",
+        recommendations=[recommendation],
+    )
+    source_reader = PdfReader(BytesIO(source))
+    reviewed_reader = PdfReader(BytesIO(reviewed))
+    assert len(source_reader.pages) == 1
+    assert len(reviewed_reader.pages) >= 2
+    assert "Original black manuscript text" in (reviewed_reader.pages[0].extract_text() or "")
+    assert "Suggested blue manuscript text" in " ".join(page.extract_text() or "" for page in reviewed_reader.pages[1:])
+
+
+def test_editorial_report_is_structured_and_hides_machine_ids() -> None:
+    report = create_editorial_report_pdf(
+        journal_title="Physical Review Letters",
+        manuscript_title="Synthetic manuscript",
+        recommendations=[
+            {
+                "id": "machine-only-identifier",
+                "category": "structure",
+                "anchor": "page:2",
+                "severity": "strongly-recommended",
+                "basis": "observed-pattern",
+                "decision": "pending",
+                "originalText": "Current passage.",
+                "proposedText": "Proposed passage.",
+                "rationale": "State the decisive result earlier.",
+                "scientificImpact": False,
+            }
+        ],
+        rules=[],
+        limitations=["Author validation remains required."],
+        reference_count=6,
+    )
+    text = " ".join(page.extract_text() or "" for page in PdfReader(BytesIO(report)).pages)
+    assert "Executive verdict" in text
+    assert "Detailed revision ledger" in text
+    assert "Proposed passage" in text
+    assert "machine-only-identifier" not in text

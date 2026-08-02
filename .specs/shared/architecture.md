@@ -56,7 +56,7 @@ flowchart LR
 6. Analyze at least the three private user uploads and enrich the sample with up to three discovered sources. Produce bounded structural/style features and evidence links, reporting the actual sample size.
 7. Load the current versioned journal profile; propose a new candidate profile; validate provenance and confidence; then publish it atomically.
 8. Compare the private manuscript against journal requirements and the profile. Separate deterministic violations from model-based recommendations.
-9. Generate proposed revisions, a change ledger, and DOCX/PDF outputs. Run integrity checks and require the user to review material scientific edits.
+9. Generate a structured editorial assessment and color-coded DOCX/PDF review copies. Preserve a DOCX source package in place; preserve PDF source pages unchanged and interleave anchored suggestion pages. Run structural and visual integrity checks and require the user to review material scientific edits.
 10. Hard-delete uploaded objects and extracted private text at terminal success, cancellation, or final failure. Keep generated downloads for at most 24 hours, then hard-delete the private project and its artifacts.
 
 ## Data model

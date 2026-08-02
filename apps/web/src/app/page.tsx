@@ -1,6 +1,6 @@
 'use client';
 
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, useMemo, useRef, useState } from 'react';
 
 type UploadState = {
   references: File[];
@@ -10,71 +10,58 @@ type UploadState = {
 const progressStages = [
   {
     key: 'project',
-    label: 'Criando o projeto',
+    label: 'Creating the analysis workspace',
     start: 0,
     end: 8,
-    messages: ['Criando uma área temporária e privada para esta análise.'],
+    message: 'Creating a temporary workspace for this analysis.',
   },
   {
     key: 'uploads',
-    label: 'Enviando e validando os arquivos',
+    label: 'Uploading and validating files',
     start: 8,
     end: 25,
-    messages: [
-      'Enviando os documentos selecionados.',
-      'Verificando formato, integridade e conteúdo extraível.',
-    ],
+    message:
+      'Uploading the selected documents and validating their format and extractable content.',
   },
   {
     key: 'journal-resolution',
-    label: 'Identificando a revista e as páginas oficiais',
+    label: 'Confirming the journal and official guidance',
     start: 25,
     end: 40,
-    messages: [
-      'Confirmando a identidade da revista informada.',
-      'Localizando o escopo e o guia oficial dos autores.',
-    ],
+    message:
+      'Confirming the journal identity and validating the supplied official pages.',
   },
   {
     key: 'journal-research',
-    label: 'Estudando o padrão editorial da revista',
+    label: 'Learning the journal editorial pattern',
     start: 40,
     end: 62,
-    messages: [
-      'Lendo o escopo e o guia oficial dos autores.',
-      'Buscando artigos recentes e versões abertas disponíveis.',
-      'Comparando a arquitetura e a redação dos artigos publicados.',
-    ],
+    message:
+      'Reviewing official guidance, recent articles, and the published editorial pattern.',
   },
   {
     key: 'manuscript-analysis',
-    label: 'Comparando seu artigo com o padrão encontrado',
+    label: 'Comparing the manuscript with that pattern',
     start: 62,
     end: 78,
-    messages: [
-      'Verificando estrutura, forma, conteúdo e apresentação científica.',
-      'Localizando trechos que precisam de ajuste para a revista.',
-    ],
+    message:
+      'Checking structure, writing, content development, and scientific presentation.',
   },
   {
     key: 'ai-review',
-    label: 'Preparando as sugestões editoriais',
+    label: 'Preparing editorial suggestions',
     start: 78,
     end: 90,
-    messages: [
-      'Redigindo sugestões ancoradas no texto original.',
-      'Revisando as sugestões para evitar mudanças científicas indevidas.',
-    ],
+    message:
+      'Writing anchored suggestions and applying scientific-meaning safeguards.',
   },
   {
     key: 'artifact-generation',
-    label: 'Gerando e validando os arquivos finais',
+    label: 'Generating and validating deliverables',
     start: 90,
     end: 100,
-    messages: [
-      'Gerando o relatório e o manuscrito com alterações destacadas.',
-      'Validando os arquivos antes de liberar os downloads.',
-    ],
+    message:
+      'Generating the report and color-coded review copies, then validating each file.',
   },
 ] as const;
 
@@ -108,17 +95,6 @@ function stageIndex(progress: number, backendStage?: string) {
   return current >= 0 ? current : progressStages.length - 1;
 }
 
-function stagePercentage(
-  stage: (typeof progressStages)[number],
-  progress: number,
-) {
-  if (progress >= stage.end) return 100;
-  if (progress <= stage.start) return 0;
-  return Math.round(
-    ((progress - stage.start) / (stage.end - stage.start)) * 100,
-  );
-}
-
 function sameOfficialDomain(scopeUrl: string, guideUrl: string) {
   try {
     const scope = new URL(scopeUrl);
@@ -136,32 +112,31 @@ function sameOfficialDomain(scopeUrl: string, guideUrl: string) {
 function workflowError(job: JobStatus) {
   const code = job.errorCode ?? 'workflow-failed';
   return code.includes('502')
-    ? 'Não foi possível acessar um serviço necessário. Aguarde alguns minutos e tente novamente. Se o problema continuar, confira o ISSN e as páginas oficiais informadas.'
+    ? 'A required service could not be reached. Wait a few minutes and try again. If the problem continues, check the ISSN and official pages.'
     : code.includes('503')
-      ? 'O serviço está temporariamente indisponível. Aguarde alguns minutos e tente novamente.'
+      ? 'The service is temporarily unavailable. Wait a few minutes and try again.'
       : code.includes('422')
-        ? 'Revise os campos e os arquivos enviados. Um deles não pôde ser validado com segurança.'
+        ? 'Review the fields and uploaded files. One item could not be validated safely.'
         : code.includes('409')
-          ? 'Confira se todos os campos obrigatórios e documentos foram enviados e tente novamente.'
-          : 'Não foi possível concluir a análise. Confira os campos e arquivos e tente novamente em alguns minutos.';
+          ? 'Check that every required field and document was supplied, then try again.'
+          : 'The analysis could not be completed. Check the fields and files, then try again in a few minutes.';
 }
 
 function requestError(status: number) {
-  if (status === 413) return 'Um dos arquivos excede o limite de 25 MB.';
+  if (status === 413) return 'One file exceeds the 25 MB limit.';
   if (status === 415)
-    return 'Um dos arquivos está em formato incompatível. Use PDF nos artigos de orientação e PDF ou Word no manuscrito.';
+    return 'One file has an incompatible format. Use PDF for reference articles and PDF or Word for the manuscript.';
   if (status === 422)
-    return 'Revise os campos e os arquivos enviados. Um deles não pôde ser validado.';
+    return 'Review the fields and uploaded files. One item could not be validated.';
   if (status === 409)
-    return 'Confira se todos os campos obrigatórios e documentos foram enviados e tente novamente.';
-  return 'Não foi possível continuar agora. Aguarde alguns minutos e tente novamente.';
+    return 'Check that every required field and document was supplied, then try again.';
+  return 'The workflow cannot continue now. Wait a few minutes and try again.';
 }
 
 const artifactLabels: Record<string, string> = {
-  'revision-report.pdf': 'Relatório de adequação (PDF)',
-  'revised-manuscript.docx': 'Artigo revisado (Word)',
-  'revised-manuscript.pdf': 'Artigo revisado (PDF)',
-  'provenance-manifest.json': 'Registro de fontes e processamento',
+  'revision-report.pdf': 'Submission-fit report (PDF)',
+  'revised-manuscript.docx': 'Color-coded manuscript review (Word)',
+  'revised-manuscript.pdf': 'Template-faithful manuscript review (PDF)',
 };
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -176,7 +151,7 @@ function FileSummary({ files }: { files: File[] }) {
   if (files.length === 0) return null;
 
   return (
-    <ul className="file-list" aria-label="Arquivos selecionados">
+    <ul className="file-list" aria-label="Selected files">
       {files.map((file) => (
         <li key={`${file.name}-${file.size}`}>
           <span>{file.name}</span>
@@ -199,7 +174,6 @@ export default function HomePage() {
   const [activeStep, setActiveStep] = useState(0);
   const [overallProgress, setOverallProgress] = useState(0);
   const [runState, setRunState] = useState<RunState>('idle');
-  const [activityIndex, setActivityIndex] = useState(0);
   const [error, setError] = useState('');
   const [analysisId, setAnalysisId] = useState('');
   const [artifacts, setArtifacts] = useState<string[]>([]);
@@ -208,17 +182,7 @@ export default function HomePage() {
   const runContext = useRef<RunContext | null>(null);
   const stopRequested = useRef(false);
 
-  const activeMessages = progressStages[activeStep]?.messages ?? [];
-  const activityMessage =
-    activeMessages[activityIndex % Math.max(activeMessages.length, 1)] ?? '';
-
-  useEffect(() => {
-    if (runState !== 'running' || activeMessages.length < 2) return;
-    const timer = window.setInterval(() => {
-      setActivityIndex((current) => current + 1);
-    }, 3500);
-    return () => window.clearInterval(timer);
-  }, [activeStep, activeMessages.length, runState]);
+  const activityMessage = progressStages[activeStep]?.message ?? '';
 
   const assistedValues = Object.values(guidance).map((value) => value.trim());
   const officialUrlsReady = sameOfficialDomain(
@@ -241,24 +205,24 @@ export default function HomePage() {
   const status = useMemo(() => {
     if (ready) {
       return started
-        ? `Análise iniciada para ${journal.trim()}.`
-        : 'Arquivos prontos para análise.';
+        ? `Analysis started for ${journal.trim()}.`
+        : 'Files are ready for analysis.';
     }
-    if (!journal.trim()) return 'Informe a revista-alvo para iniciar.';
-    if (!issnReady) return 'Informe o ISSN da revista no formato 1234-567X.';
+    if (!journal.trim()) return 'Enter the target journal to begin.';
+    if (!issnReady) return 'Enter the journal ISSN in the format 1234-567X.';
     if (!assistedReady) {
-      return 'Complete o Scope e o Guide for Authors com URLs HTTPS do mesmo domínio oficial.';
+      return 'Complete the Scope and Guide for Authors using HTTPS URLs from the same official domain.';
     }
     if (uploads.references.length > 0 && uploads.references.length < 3) {
-      return `Adicione pelo menos mais ${3 - uploads.references.length} artigo${uploads.references.length === 2 ? '' : 's'} de orientação.`;
+      return `Add at least ${3 - uploads.references.length} more reference article${uploads.references.length === 2 ? '' : 's'}.`;
     }
     if (uploads.references.length >= 3) {
-      return 'Agora envie o artigo que será preparado para submissão.';
+      return 'Now upload the manuscript to be prepared for submission.';
     }
     if (uploads.manuscript) {
-      return 'Agora envie pelo menos três artigos publicados na revista pretendida.';
+      return 'Now upload at least three articles published in the target journal.';
     }
-    return 'Envie os dois conjuntos de arquivos para iniciar.';
+    return 'Upload both sets of files to begin.';
   }, [assistedReady, issnReady, journal, ready, started, uploads]);
 
   async function startAnalysis() {
@@ -358,7 +322,7 @@ export default function HomePage() {
       }
       if (!workflow.analysisId || !workflow.artifacts) {
         throw new Error(
-          'A análise excedeu o tempo de acompanhamento. Tente novamente mais tarde.',
+          'The analysis exceeded the monitoring window. Try again later.',
         );
       }
       setAnalysisId(workflow.analysisId);
@@ -372,7 +336,7 @@ export default function HomePage() {
       setError(
         caught instanceof Error
           ? caught.message
-          : 'Não foi possível concluir a análise.',
+          : 'The analysis could not be completed.',
       );
       setRunState('failed');
       setStarted(false);
@@ -399,7 +363,7 @@ export default function HomePage() {
       }
     } catch {
       setError(
-        'A análise parou nesta tela. Os dados temporários restantes serão eliminados automaticamente.',
+        'The analysis stopped on this screen. Any remaining temporary data will be removed automatically.',
       );
     }
   }
@@ -415,7 +379,6 @@ export default function HomePage() {
     setActiveStep(0);
     setOverallProgress(0);
     setRunState('idle');
-    setActivityIndex(0);
     setError('');
     setAnalysisId('');
     setArtifacts([]);
@@ -454,41 +417,41 @@ export default function HomePage() {
       </header>
 
       <section className="intro" aria-labelledby="page-title">
-        <p className="eyebrow">Prepare seu artigo para a revista certa</p>
-        <h1 id="page-title">Do rascunho à submissão.</h1>
+        <p className="eyebrow">Prepare your manuscript for the right journal</p>
+        <h1 id="page-title">From draft to submission.</h1>
         <p className="lede">
-          Informe a revista, envie artigos de orientação e o seu manuscrito. O
-          Article Fit aprende o padrão editorial e entrega uma revisão de forma
-          e conteúdo. Os documentos enviados são temporários e não entram na
-          memória da revista.
+          Enter the journal, upload reference articles and your manuscript.
+          Article Fit learns the editorial pattern and delivers a review of both
+          presentation and content. Uploaded documents are temporary and never
+          become part of the journal memory.
         </p>
       </section>
 
-      <section className="upload-panel" aria-label="Envio dos documentos">
+      <section className="upload-panel" aria-label="Document upload">
         <div className="journal-block">
-          <label htmlFor="target-journal">Revista-alvo</label>
+          <label htmlFor="target-journal">Target journal</label>
           <input
             id="target-journal"
             type="text"
             value={journal}
             onChange={(event) => setJournal(event.currentTarget.value)}
-            placeholder="Ex.: Physical Review Letters"
+            placeholder="e.g. Physical Review Letters"
             autoComplete="organization"
             required
           />
-          <small>Informe o nome completo da revista.</small>
-          <label htmlFor="target-journal-issn">ISSN da revista</label>
+          <small>Enter the journal&apos;s full name.</small>
+          <label htmlFor="target-journal-issn">Journal ISSN</label>
           <input
             id="target-journal-issn"
             type="text"
             value={journalIssn}
             onChange={(event) => setJournalIssn(event.currentTarget.value)}
-            placeholder="Ex.: 0031-9007"
+            placeholder="e.g. 0031-9007"
             inputMode="text"
             required
           />
           <small>
-            O ISSN evita consultas desnecessárias para identificar a revista.
+            The ISSN prevents unnecessary journal-identification requests.
           </small>
         </div>
 
@@ -498,12 +461,12 @@ export default function HomePage() {
           <div className="upload-copy">
             <span className="step">01</span>
             <div>
-              <h2>Artigos de orientação</h2>
-              <p>Selecione três ou mais PDFs publicados na revista-alvo.</p>
+              <h2>Reference articles</h2>
+              <p>Select three or more PDFs published in the target journal.</p>
             </div>
           </div>
           <label className="upload-button" htmlFor="reference-files">
-            Selecionar artigos
+            Select articles
           </label>
           <input
             key={`references-${inputVersion}`}
@@ -517,8 +480,8 @@ export default function HomePage() {
           <FileSummary files={uploads.references} />
           {uploads.references.length > 3 && (
             <small className="file-limit-notice">
-              O MVP processará os três primeiros PDFs; os demais não serão
-              enviados.
+              The MVP will process the first three PDFs; the remaining files
+              will not be uploaded.
             </small>
           )}
         </div>
@@ -529,12 +492,12 @@ export default function HomePage() {
           <div className="upload-copy">
             <span className="step">02</span>
             <div>
-              <h2>Seu artigo</h2>
-              <p>Envie o manuscrito em PDF ou Word.</p>
+              <h2>Your manuscript</h2>
+              <p>Upload the manuscript as PDF or Word.</p>
             </div>
           </div>
           <label className="upload-button secondary" htmlFor="manuscript-file">
-            Selecionar manuscrito
+            Select manuscript
           </label>
           <input
             key={`manuscript-${inputVersion}`}
@@ -545,6 +508,10 @@ export default function HomePage() {
             onChange={selectManuscript}
           />
           <FileSummary files={uploads.manuscript ? [uploads.manuscript] : []} />
+          <small className="file-limit-notice">
+            Word preserves an editable template. With PDF, the PDF review keeps
+            every original page intact and adds color-coded suggestion pages.
+          </small>
         </div>
       </section>
 
@@ -555,17 +522,17 @@ export default function HomePage() {
         <div className="upload-copy">
           <span className="step">03</span>
           <div>
-            <h2 id="official-guidance-title">Orientação oficial</h2>
-            <p>Scope e Guide for Authors são obrigatórios.</p>
+            <h2 id="official-guidance-title">Official guidance</h2>
+            <p>Scope and Guide for Authors are required.</p>
           </div>
         </div>
         <p>
-          Informe as páginas oficiais e cole o texto visível de cada uma. Isso
-          reduz bloqueios das editoras e acelera a análise.
+          Enter the official pages and paste the visible text from each one.
+          This reduces publisher blocking and speeds up the analysis.
         </p>
         <div className="assisted-grid">
           <label>
-            URL oficial do escopo
+            Official Scope URL
             <input
               type="url"
               value={guidance.scopeUrl}
@@ -573,12 +540,12 @@ export default function HomePage() {
                 const value = event.currentTarget.value;
                 setGuidance((current) => ({ ...current, scopeUrl: value }));
               }}
-              placeholder="https://editora.example/revista/scope"
+              placeholder="https://publisher.example/journal/scope"
               required
             />
           </label>
           <label>
-            URL oficial do guia dos autores
+            Official Guide for Authors URL
             <input
               type="url"
               value={guidance.guideUrl}
@@ -586,12 +553,12 @@ export default function HomePage() {
                 const value = event.currentTarget.value;
                 setGuidance((current) => ({ ...current, guideUrl: value }));
               }}
-              placeholder="https://editora.example/revista/authors"
+              placeholder="https://publisher.example/journal/authors"
               required
             />
           </label>
           <label>
-            Texto da página de escopo
+            Scope page text
             <textarea
               value={guidance.scopeSnapshot}
               onChange={(event) => {
@@ -603,11 +570,11 @@ export default function HomePage() {
               }}
               minLength={500}
               required
-              placeholder="Cole ao menos 500 caracteres da página oficial."
+              placeholder="Paste at least 500 characters from the official page."
             />
           </label>
           <label>
-            Texto do guia dos autores
+            Guide for Authors text
             <textarea
               value={guidance.guideSnapshot}
               onChange={(event) => {
@@ -619,13 +586,13 @@ export default function HomePage() {
               }}
               minLength={500}
               required
-              placeholder="Cole ao menos 500 caracteres da página oficial."
+              placeholder="Paste at least 500 characters from the official page."
             />
           </label>
         </div>
         {!assistedReady && (
           <small className="file-limit-notice">
-            Preencha as duas URLs e pelo menos 500 caracteres de cada página.
+            Provide both URLs and at least 500 characters from each page.
           </small>
         )}
       </section>
@@ -642,7 +609,7 @@ export default function HomePage() {
           disabled={!ready || started}
           onClick={startAnalysis}
         >
-          {started ? 'Análise em andamento' : 'Iniciar análise'}
+          {started ? 'Analysis in progress' : 'Start analysis'}
         </button>
         <button
           className="reset-button"
@@ -650,7 +617,7 @@ export default function HomePage() {
           disabled={runState === 'running'}
           onClick={resetForm}
         >
-          Limpar campos
+          Reset form
         </button>
       </div>
 
@@ -665,22 +632,22 @@ export default function HomePage() {
           >
             <div className="progress-heading">
               <div>
-                <p className="eyebrow">Andamento real</p>
+                <p className="eyebrow">Confirmed workflow status</p>
                 <h2 id="progress-title">
                   {runState === 'running' && (
                     <span className="spinner" aria-hidden="true" />
                   )}
                   {runState === 'failed' || runState === 'cancelled'
-                    ? 'Análise interrompida'
+                    ? 'Analysis stopped'
                     : runState === 'succeeded'
-                      ? 'Arquivos prontos'
-                      : 'Preparando seu artigo'}
+                      ? 'Files ready'
+                      : 'Preparing your manuscript'}
                 </h2>
               </div>
               <button
                 type="button"
                 className="close-button"
-                aria-label="Fechar acompanhamento"
+                aria-label="Close progress dialog"
                 onClick={hideProgress}
                 disabled={runState === 'running'}
               >
@@ -693,21 +660,21 @@ export default function HomePage() {
                 className="progress-description activity-line"
                 aria-live="polite"
               >
-                <strong>Agora:</strong> {activityMessage}
+                <strong>Current confirmed stage:</strong> {activityMessage}
               </p>
             ) : (
               <p id="progress-description" className="progress-description">
                 {runState === 'succeeded'
-                  ? 'Processamento concluído e downloads liberados.'
+                  ? 'Processing is complete and downloads are available.'
                   : runState === 'cancelled'
-                    ? 'A análise foi interrompida. Você pode ajustar os campos e iniciar novamente.'
-                    : 'Não foi possível concluir. Siga a orientação abaixo.'}
+                    ? 'The analysis was stopped. You can adjust the fields and start again.'
+                    : 'The analysis could not be completed. Follow the guidance below.'}
               </p>
             )}
             <div
               className="progress-track determinate"
               role="progressbar"
-              aria-label="Andamento da análise"
+              aria-label="Milestone progress"
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={overallProgress}
@@ -719,7 +686,8 @@ export default function HomePage() {
               />
             </div>
             <p className="overall-progress">
-              Progresso geral: aproximadamente {overallProgress}%
+              Estimated milestone completion: {overallProgress}%. This value is
+              based on confirmed workflow milestones, not elapsed time.
             </p>
             <ol className="progress-steps">
               {progressStages.map((stage, index) => {
@@ -734,8 +702,14 @@ export default function HomePage() {
                           ? 'active'
                           : ''
                       : '';
-                const percentage = stagePercentage(stage, overallProgress);
-                const label = `${percentage}%${index === activeStep && runState === 'running' ? ' aprox.' : ''}`;
+                const label =
+                  state === 'complete'
+                    ? 'Complete'
+                    : state === 'active'
+                      ? 'In progress'
+                      : state === 'error'
+                        ? 'Stopped here'
+                        : 'Waiting';
                 return (
                   <li className={state} key={stage.key}>
                     <span
@@ -761,17 +735,17 @@ export default function HomePage() {
                 type="button"
                 onClick={stopAnalysis}
               >
-                Parar análise
+                Stop analysis
               </button>
             )}
             {runState === 'cancelled' && !error && (
               <p className="preview-notice" role="status">
-                Análise interrompida. Nenhum arquivo final foi gerado.
+                Analysis stopped. No final file was generated.
               </p>
             )}
             {runState === 'succeeded' && !error && (
               <p className="preview-notice" role="status">
-                Análise concluída. Os arquivos estão disponíveis abaixo.
+                Analysis complete. The files are available below.
               </p>
             )}
           </section>
@@ -789,13 +763,13 @@ export default function HomePage() {
         aria-labelledby="results-title"
       >
         <div>
-          <p className="eyebrow">Saídas</p>
-          <h2 id="results-title">Resultados</h2>
+          <p className="eyebrow">Deliverables</p>
+          <h2 id="results-title">Results</h2>
         </div>
         <p>
           {artifacts.length
-            ? 'A análise terminou. Baixe os produtos gerados abaixo.'
-            : 'Quando a análise terminar, os produtos aparecerão aqui para download.'}
+            ? 'The analysis is complete. Download the generated deliverables below.'
+            : 'When the analysis is complete, the deliverables will appear here.'}
         </p>
         {artifacts.length > 0 && (
           <div className="result-grid">
@@ -806,7 +780,7 @@ export default function HomePage() {
                 download
               >
                 <span>{artifactLabels[kind] ?? kind}</span>
-                <small>Baixar arquivo</small>
+                <small>Download file</small>
               </a>
             ))}
           </div>
@@ -814,8 +788,8 @@ export default function HomePage() {
       </section>
 
       <footer>
-        Os originais são eliminados após o processamento. Os arquivos de saída
-        ficam disponíveis temporariamente por até 24 horas.
+        Original uploads are deleted after processing. Generated files remain
+        available temporarily for up to 24 hours.
       </footer>
     </main>
   );

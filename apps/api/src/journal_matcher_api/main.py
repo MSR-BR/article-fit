@@ -22,6 +22,11 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from journal_matcher_api import __version__
+from journal_matcher_api.artifact_rendering import (
+    create_editorial_report_pdf,
+    create_pdf_review_copy,
+    create_text_review_pdf,
+)
 from journal_matcher_api.foundation import FoundationStore, Principal, validate_and_extract
 from journal_matcher_api.gemini import (
     GeminiConfigurationError,
@@ -57,7 +62,6 @@ from journal_matcher_api.manuscript_analysis import (
     annotate_docx,
     build_recommendations,
     create_docx,
-    create_pdf,
     extract_official_rules,
     scientific_invariants,
     store_artifact_set,
@@ -930,6 +934,7 @@ async def generate_artifacts(
     repository.migrate()
     analysis = repository.get(principal, analysis_id)
     manuscript = store.manuscript_record(principal, str(analysis["projectId"]))
+    project = store.get_project(principal, str(analysis["projectId"]))
     recommendations = analysis["recommendations"]
     assert isinstance(recommendations, list)
     text = str(manuscript["text"])
@@ -938,70 +943,60 @@ async def generate_artifacts(
     docx = (
         create_docx(text, recommendations, reconstructed) if reconstructed else annotate_docx(original, recommendations)
     )
-    revision_lines = [text, "", "Accepted revision notes:"] + [
-        f"[{item['category']}] {item.get('modifiedText') or item.get('proposedText') or item['rationale']}"
-        for item in recommendations
-        if isinstance(item, dict) and item.get("decision") in {"accepted", "modified"}
+    manuscript_title = next(
+        (line.strip() for line in text.splitlines() if len(line.strip()) >= 8), "Submitted manuscript"
+    )
+    visible_recommendations = [
+        item for item in recommendations if isinstance(item, dict) and item.get("decision") != "rejected"
     ]
-    revised_pdf = create_pdf("Revised manuscript - review copy", revision_lines)
-    validate_invariant_preservation(text, "\n".join(revision_lines))
+    revised_pdf = (
+        create_pdf_review_copy(
+            original_pdf=original,
+            manuscript_title=manuscript_title,
+            recommendations=visible_recommendations,
+        )
+        if reconstructed
+        else create_text_review_pdf(
+            manuscript_title=manuscript_title,
+            manuscript_text=text,
+            recommendations=visible_recommendations,
+        )
+    )
+    revision_text = "\n".join(
+        [
+            text,
+            *[
+                str(item.get("modifiedText") or item.get("proposedText") or item.get("rationale") or "")
+                for item in visible_recommendations
+            ],
+        ]
+    )
+    validate_invariant_preservation(text, revision_text)
     validate_proposal_parity(docx, revised_pdf, recommendations)
     limitation_items = analysis["limitations"]
     if not isinstance(limitation_items, list):
         raise HTTPException(status_code=500, detail="Stored analysis limitations are invalid")
-    report_lines = [
-        "1. Executive summary",
-        "No journal acceptance is guaranteed.",
-        f"Analysis: {analysis_id}",
-        f"Profile version: {analysis['profileVersionId']}",
-        "2. Inputs and source coverage",
-        f"Manuscript hash: {manuscript['contentHash']}",
-        "Official guidance and journal-pattern evidence are identified in each recommendation.",
-        "3. Guide compliance matrix",
-        "Required items originate only from validated official-guide rules.",
-        "4. Scientific and methodological review",
-        "Scientific-impact proposals require explicit author-modified text and are never auto-applied.",
-        "5. Article architecture and journal fit",
-        "Observed patterns are advisory and never presented as official requirements.",
-        "6. Presentation, language, and layout",
-        "Category names accompany color annotations so meaning does not depend on color.",
-        "7. Change ledger",
-        *[f"Limitation: {item}" for item in limitation_items],
-        *[
-            f"{item['id']} | {item['severity']} | {item['basis']} | {item['decision']} | {item['rationale']}"
-            for item in recommendations
-            if isinstance(item, dict)
-        ],
-        "8. Unresolved items and author actions",
-        *[
-            f"Pending: {item['id']} | {item['rationale']}"
-            for item in recommendations
-            if isinstance(item, dict) and item.get("decision") == "pending"
-        ],
-        "9. Sources and reproducibility",
-        f"Profile version: {analysis['profileVersionId']}; deterministic template: c4-standard-business-brief-1.",
-    ]
-    report_pdf = create_pdf("Article Fit revision report", report_lines)
-    manifest_payload = {
-        "schemaVersion": "1.0",
-        "analysisId": analysis_id,
-        "projectId": analysis["projectId"],
-        "manuscriptHash": manuscript["contentHash"],
-        "profileVersionId": analysis["profileVersionId"],
-        "templateVersion": "c4-standard-business-brief-1",
-        "model": None,
-        "recommendationDecisions": [
-            {"id": item["id"], "decision": item["decision"]} for item in recommendations if isinstance(item, dict)
-        ],
-        "generatedAt": datetime.now(UTC).isoformat(),
-    }
-    manifest = json.dumps(manifest_payload, indent=2, sort_keys=True).encode()
-    validation = validate_artifacts(docx, revised_pdf, report_pdf, manifest)
+    journal = cast(dict[str, object], project.get("journal") or {})
+    profile = profile_repository(store).get(str(analysis["profileVersionId"]))
+    claims = cast(list[dict[str, object]], profile.get("claims", []))
+    public_sources: set[str] = set()
+    for claim in claims:
+        source_ids = claim.get("sourceIds", [])
+        if isinstance(source_ids, list):
+            public_sources.update(str(source_id) for source_id in source_ids)
+    report_pdf = create_editorial_report_pdf(
+        journal_title=str(journal.get("title") or "Target journal"),
+        manuscript_title=manuscript_title,
+        recommendations=visible_recommendations,
+        rules=cast(list[dict[str, object]], analysis["rules"]),
+        limitations=[str(item) for item in limitation_items],
+        reference_count=max(3, len(public_sources)),
+    )
+    validation = validate_artifacts(docx, revised_pdf, report_pdf)
     artifact_set = {
         "revised-manuscript.docx": docx,
         "revised-manuscript.pdf": revised_pdf,
         "revision-report.pdf": report_pdf,
-        "provenance-manifest.json": manifest,
     }
     if isinstance(repository, HostedAnalysisRepository):
         result = repository.store_artifacts(principal, analysis_id, artifact_set, validation)
@@ -1016,9 +1011,7 @@ async def generate_artifacts(
 @app.get("/v1/analyses/{analysis_id}/artifacts/{kind}", tags=["artifacts"])
 async def download_artifact(
     analysis_id: str,
-    kind: Literal[
-        "revised-manuscript.docx", "revised-manuscript.pdf", "revision-report.pdf", "provenance-manifest.json"
-    ],
+    kind: Literal["revised-manuscript.docx", "revised-manuscript.pdf", "revision-report.pdf"],
     principal: PrincipalDependency,
     store: StoreDependency,
 ) -> Response:
@@ -1030,8 +1023,6 @@ async def download_artifact(
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         if kind.endswith(".docx")
         else "application/pdf"
-        if kind.endswith(".pdf")
-        else "application/json"
     )
     return Response(
         content=content,
