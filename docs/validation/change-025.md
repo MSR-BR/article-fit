@@ -4,9 +4,9 @@ Date: 2026-08-02
 
 Production frontend: `https://article-fit.vercel.app`
 
-Production API revision: `article-fit-api-00035-vur`
+Production API revision: `article-fit-api-00037-xiw`
 
-Container tag: `c25-20260802-8`
+Container tag: `c25-20260802-9`
 
 ## Outcome
 
@@ -28,6 +28,8 @@ and 100 without progress regression. The final analysis ID was
    labels, normalizes priority synonyms, forces author validation for scientific changes, removes unsupported
    source IDs, and downgrades unsupported evidence claims to clearly labelled expert suggestions.
 5. Provider or memory degradation no longer destroys an otherwise valid deterministic analysis.
+6. Free-form Research Starter warnings are summarized in a fixed English limitation so an external provider
+   cannot introduce mixed-language UI or report text.
 
 ## Content acceptance
 
@@ -73,7 +75,7 @@ contains 188 code files (10.6 MiB) and excludes `tmp/`, `.vercel/`, and uploaded
 
 ## Deployment and rollback
 
-- API: `article-fit-api-00035-vur`, 100% traffic.
-- Worker and retention jobs: image `worker:c25-20260802-8`.
+- API: `article-fit-api-00037-xiw`, 100% traffic.
+- Worker and retention jobs: image `worker:c25-20260802-9`.
 - Frontend: Vercel deployment `dpl_Gc9WSHQzCz8j6yqppEELzH7KDWxR`.
-- Immediate rollback revision: `article-fit-api-00033-tug`.
+- Immediate rollback revision: `article-fit-api-00035-vur`.

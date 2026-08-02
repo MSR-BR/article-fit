@@ -34,11 +34,11 @@ isolation, artifact download, deletion, and synthetic end-to-end tests pass.
 
 ## Verified pilot deployment
 
-- API: `https://article-fit-api-xstipge7eq-ue.a.run.app`, revision `article-fit-api-00035-vur` at 100% traffic.
-- Worker: Cloud Run Job `article-fit-worker`, image tag `c25-20260802-8`; hosted manuscript execution completed successfully.
+- API: `https://article-fit-api-xstipge7eq-ue.a.run.app`, revision `article-fit-api-00037-xiw` at 100% traffic.
+- Worker: Cloud Run Job `article-fit-worker`, image tag `c25-20260802-9`; hosted manuscript execution completed successfully.
 - Retention: Cloud Run Job `article-fit-retention`; manual execution `article-fit-retention-h5tnh` and scheduled execution `article-fit-retention-2bf8j` completed successfully.
 - Scheduler: `article-fit-retention-hourly`, enabled in `us-east1`, schedule `17 * * * *`, timezone `America/Sao_Paulo`.
 - Frontend: `https://article-fit.vercel.app`, production deployment `dpl_Gc9WSHQzCz8j6yqppEELzH7KDWxR`.
 - API service scaling: minimum zero (default), maximum one, concurrency four, timeout 300 seconds.
-- Rollback target: retained API revision `article-fit-api-00033-tug`.
+- Rollback target: retained API revision `article-fit-api-00035-vur`.
 - Access: the public MVP has no end-user login; Vercel supplies the server-only credential and direct unauthenticated API access remains blocked.

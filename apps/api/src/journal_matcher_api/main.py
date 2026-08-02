@@ -1041,7 +1041,11 @@ async def _create_ai_review(
                     cast(list[dict[str, object]], research_result.top_papers),
                 )
             )
-            review_limitations.extend(research_result.warnings)
+            if research_result.warnings:
+                review_limitations.append(
+                    "The recent-literature provider reported limitations; retrieved records remain candidates "
+                    "and require author verification."
+                )
         except HTTPException as error:
             print(
                 json.dumps(
