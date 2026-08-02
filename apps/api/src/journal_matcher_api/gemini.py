@@ -25,13 +25,34 @@ class EditorialProposal(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     anchor: str = Field(min_length=1, max_length=200)
-    category: Literal["form", "structure", "language", "content", "scientific-question", "compliance"]
+    category: Literal[
+        "scientific-framing",
+        "theory-methodology",
+        "validation-robustness",
+        "results-analysis",
+        "figures-equations",
+        "structure",
+        "writing",
+        "compliance",
+    ]
+    intervention_type: Literal[
+        "rewrite",
+        "restructure",
+        "cut-or-move",
+        "new-analysis",
+        "new-measurement",
+        "new-figure",
+        "new-validation",
+        "clarification",
+    ] = Field(alias="interventionType")
     priority: Literal["required", "high", "medium", "low", "question"]
     basis: Literal["official-requirement", "observed-pattern", "expert-suggestion"]
     original_text: str = Field(alias="originalText", max_length=12_000)
     proposed_text: str | None = Field(alias="proposedText", default=None, max_length=12_000)
     rationale: str = Field(min_length=1, max_length=4_000)
     action: str = Field(min_length=1, max_length=4_000)
+    journal_expectation: str = Field(alias="journalExpectation", min_length=1, max_length=4_000)
+    reference_pattern: str = Field(alias="referencePattern", min_length=1, max_length=4_000)
     source_ids: list[str] = Field(alias="sourceIds", max_length=20)
     scientific_impact: bool = Field(alias="scientificImpact")
     author_validation_required: bool = Field(alias="authorValidationRequired")
@@ -61,6 +82,28 @@ class GeminiResult:
 
 MAX_PROMPT_CHARACTERS = 180_000
 MAX_SEGMENT_CHARACTERS = 8_000
+MAX_REFERENCE_CHARACTERS = 18_000
+
+REQUIRED_REVIEW_DIMENSIONS = {
+    "scientific-framing",
+    "theory-methodology",
+    "validation-robustness",
+    "results-analysis",
+    "figures-equations",
+    "structure",
+    "writing",
+    "compliance",
+}
+
+
+def _reference_excerpt(text: str) -> str:
+    """Sample the full article architecture instead of truncating after the introduction."""
+    clean = "\n".join(line.strip() for line in text.splitlines() if line.strip())
+    if len(clean) <= MAX_REFERENCE_CHARACTERS:
+        return clean
+    part = MAX_REFERENCE_CHARACTERS // 3
+    middle = max(0, (len(clean) - part) // 2)
+    return "\n[...REFERENCE EXCERPT...]\n".join((clean[:part], clean[middle : middle + part], clean[-part:]))
 
 
 def build_editorial_prompt(
@@ -70,6 +113,7 @@ def build_editorial_prompt(
     profile_claims: list[dict[str, object]],
     official_rules: list[dict[str, object]],
     deterministic_recommendations: list[dict[str, object]],
+    reference_article_texts: list[str] | None = None,
 ) -> tuple[str, set[str]]:
     """Build a bounded prompt whose uploaded text is explicitly untrusted evidence."""
     source_ids: set[str] = set()
@@ -87,15 +131,22 @@ def build_editorial_prompt(
         }
         for item in manuscript_segments
     ]
+    references = []
+    for index, text in enumerate(reference_article_texts or [], 1):
+        source_id = f"uploaded-reference-{index}"
+        source_ids.add(source_id)
+        references.append({"sourceId": source_id, "excerpt": _reference_excerpt(text)})
     package = {
         "journalTitle": journal_title[:300],
         "allowedSourceIds": sorted(source_ids),
         "officialRules": official_rules,
         "observedJournalProfileClaims": profile_claims,
         "existingDeterministicRecommendations": deterministic_recommendations,
+        "uploadedReferenceArticleExcerpts": references,
         "manuscriptSegments": segments,
     }
-    instructions = """You are a senior scholarly editor. Compare how the manuscript is written with the supplied
+    instructions = """You are a senior scholarly editor and experienced scientific referee. Compare the manuscript
+with the supplied
 journal requirements and observed publication patterns. Review form, structure, layout, language, argument
 architecture, methods presentation, results presentation, conclusions, abstract, and scientific depth.
 Do not compare the manuscript's physics topic or results with the reference papers. The reference papers show
@@ -112,7 +163,15 @@ the relevant current text when available, explain what the journal-level expecta
 matters, and give an executable action. Supply proposedText whenever a responsible wording or structural
 replacement can be made without inventing science. Cover both form and content, including depth, missing
 validation, methods/results communication, abstract, title, introduction, conclusion, figures, and submission
-requirements. Avoid duplicates of existing deterministic recommendations. Return only the requested JSON schema."""
+requirements. Produce at least 12 non-duplicated, executable proposals. The complete set MUST cover every one
+of these dimensions: scientific-framing; theory-methodology; validation-robustness; results-analysis;
+figures-equations; structure; writing; compliance. For each proposal, separate the observed journal/reference
+pattern from the diagnosis and author action. Include concrete cuts, moves, rewrites, additional analyses,
+robustness checks, measurements, or figures when scientifically warranted. Never fabricate a proposed new
+result: use null proposedText and phrase it as an author task until the analysis or measurement has been
+performed. Use uploadedReferenceArticleExcerpts only to learn editorial execution and expected substantiation,
+never to claim topical similarity. Avoid duplicates of existing deterministic recommendations. Return only the
+requested JSON schema."""
     prompt = f"{instructions}\n\nEVIDENCE_PACKAGE_JSON\n{json.dumps(package, ensure_ascii=False, sort_keys=True)}"
     if len(prompt) > MAX_PROMPT_CHARACTERS:
         raise ValueError("Editorial evidence package exceeds the safe prompt limit")
@@ -140,8 +199,13 @@ def proposals_as_recommendations(
                 "originalText": proposal.original_text,
                 "proposedText": proposal.proposed_text,
                 "category": proposal.category,
+                "reviewDimension": proposal.category,
+                "interventionType": proposal.intervention_type,
                 "severity": severity.get(proposal.priority, proposal.priority),
-                "rationale": f"{proposal.rationale} Action: {proposal.action}",
+                "rationale": proposal.rationale,
+                "journalExpectation": proposal.journal_expectation,
+                "referencePattern": proposal.reference_pattern,
+                "authorAction": proposal.action,
                 "basis": proposal.basis,
                 "sourceIds": proposal.source_ids,
                 "evidenceCoverage": f"{len(proposal.source_ids)} source(s)",
@@ -154,6 +218,14 @@ def proposals_as_recommendations(
             }
         )
     return recommendations
+
+
+def validate_scientific_coverage(response: EditorialResponse) -> None:
+    """Refuse polished but superficial reviews before they reach the user."""
+    dimensions = {proposal.category for proposal in response.proposals}
+    missing = sorted(REQUIRED_REVIEW_DIMENSIONS - dimensions)
+    if len(response.proposals) < 12 or missing:
+        raise GeminiProviderError("Gemini review did not cover the required scientific and editorial dimensions")
 
 
 RESPONSE_SCHEMA: dict[str, object] = {
@@ -171,12 +243,15 @@ RESPONSE_SCHEMA: dict[str, object] = {
                 "required": [
                     "anchor",
                     "category",
+                    "interventionType",
                     "priority",
                     "basis",
                     "originalText",
                     "proposedText",
                     "rationale",
                     "action",
+                    "journalExpectation",
+                    "referencePattern",
                     "sourceIds",
                     "scientificImpact",
                     "authorValidationRequired",
@@ -185,7 +260,20 @@ RESPONSE_SCHEMA: dict[str, object] = {
                     "anchor": {"type": "string"},
                     "category": {
                         "type": "string",
-                        "enum": ["form", "structure", "language", "content", "scientific-question", "compliance"],
+                        "enum": sorted(REQUIRED_REVIEW_DIMENSIONS),
+                    },
+                    "interventionType": {
+                        "type": "string",
+                        "enum": [
+                            "rewrite",
+                            "restructure",
+                            "cut-or-move",
+                            "new-analysis",
+                            "new-measurement",
+                            "new-figure",
+                            "new-validation",
+                            "clarification",
+                        ],
                     },
                     "priority": {"type": "string", "enum": ["required", "high", "medium", "low", "question"]},
                     "basis": {
@@ -196,6 +284,8 @@ RESPONSE_SCHEMA: dict[str, object] = {
                     "proposedText": {"type": ["string", "null"]},
                     "rationale": {"type": "string"},
                     "action": {"type": "string"},
+                    "journalExpectation": {"type": "string"},
+                    "referencePattern": {"type": "string"},
                     "sourceIds": {"type": "array", "items": {"type": "string"}},
                     "scientificImpact": {"type": "boolean"},
                     "authorValidationRequired": {"type": "boolean"},

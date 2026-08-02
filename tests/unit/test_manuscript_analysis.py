@@ -11,6 +11,7 @@ from journal_matcher_api.manuscript_analysis import (
     build_recommendations,
     create_docx,
     create_pdf,
+    create_pdf_visual_review_docx,
     extract_official_rules,
     scientific_invariants,
     validate_artifacts,
@@ -172,6 +173,35 @@ def test_pdf_review_retains_source_page_and_adds_pending_suggestion_page() -> No
     assert "Suggested blue manuscript text" in " ".join(page.extract_text() or "" for page in reviewed_reader.pages[1:])
 
 
+def test_pdf_source_word_review_preserves_page_image_and_renders_equation() -> None:
+    source = create_pdf("Original template", ["Original black manuscript text and x = 2."])
+    reviewed = create_pdf_visual_review_docx(
+        source,
+        [
+            {
+                "category": "figures-equations",
+                "reviewDimension": "figures-equations",
+                "anchor": "page:1",
+                "decision": "pending",
+                "originalText": r"$Y(\lambda,T)=-\left\langle dH/d\lambda\right\rangle$",
+                "referencePattern": "Equations are typeset and interpreted immediately.",
+                "rationale": "The equation needs a physical interpretation.",
+                "authorAction": "Define every symbol and state the observable consequence.",
+                "proposedText": r"$Y(\lambda,T)=-\left\langle dH/d\lambda\right\rangle$",
+                "authorValidationRequired": True,
+            }
+        ],
+    )
+    with zipfile.ZipFile(BytesIO(reviewed)) as archive:
+        names = archive.namelist()
+        xml = archive.read("word/document.xml").decode()
+    assert any(name.endswith((".jpg", ".jpeg")) for name in names)
+    assert any(name.endswith(".png") for name in names)
+    assert "unchanged original manuscript" in xml
+    assert "Define every symbol" in xml
+    assert r"\left\langle" not in xml
+
+
 def test_editorial_report_is_structured_and_hides_machine_ids() -> None:
     report = create_editorial_report_pdf(
         journal_title="Physical Review Letters",
@@ -184,7 +214,7 @@ def test_editorial_report_is_structured_and_hides_machine_ids() -> None:
                 "severity": "strongly-recommended",
                 "basis": "observed-pattern",
                 "decision": "pending",
-                "originalText": "Current passage.",
+                "originalText": r"$Y(\lambda,T)=-\left\langle dH/d\lambda\right\rangle$",
                 "proposedText": "Proposed passage.",
                 "rationale": "State the decisive result earlier.",
                 "scientificImpact": False,
@@ -198,4 +228,6 @@ def test_editorial_report_is_structured_and_hides_machine_ids() -> None:
     assert "Executive verdict" in text
     assert "Detailed revision ledger" in text
     assert "Proposed passage" in text
+    assert r"\left\langle" not in text
+    assert "/Subtype /Image" in report.decode("latin-1", errors="ignore")
     assert "machine-only-identifier" not in text

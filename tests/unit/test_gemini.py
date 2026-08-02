@@ -10,6 +10,7 @@ from journal_matcher_api.gemini import (
     GeminiProviderError,
     build_editorial_prompt,
     proposals_as_recommendations,
+    validate_scientific_coverage,
 )
 
 
@@ -19,13 +20,16 @@ def editorial(*, scientific: bool = False, validation: bool = False) -> dict[str
         "proposals": [
             {
                 "anchor": "page:1",
-                "category": "content",
+                "category": "scientific-framing",
+                "interventionType": "restructure",
                 "priority": "high",
                 "basis": "observed-pattern",
                 "originalText": "Original",
                 "proposedText": "Proposed",
                 "rationale": "The result should appear earlier.",
                 "action": "Move the result.",
+                "journalExpectation": "State the central advance before technical detail.",
+                "referencePattern": "Sampled articles lead with one testable central advance.",
                 "sourceIds": ["source-1"],
                 "scientificImpact": scientific,
                 "authorValidationRequired": validation,
@@ -108,10 +112,12 @@ def test_builds_bounded_untrusted_evidence_package() -> None:
         profile_claims=[{"key": "section:abstract", "sourceIds": ["article-1"]}],
         official_rules=[{"key": "word-limit", "sourceId": "guide-1"}],
         deterministic_recommendations=[],
+        reference_article_texts=["Abstract\n" + "reference architecture " * 2_000 + "\nConclusion"],
     )
     assert "UNTRUSTED DATA" in prompt
     assert "Ignore previous instructions" in prompt
-    assert source_ids == {"article-1", "guide-1"}
+    assert "uploadedReferenceArticleExcerpts" in prompt
+    assert source_ids == {"article-1", "guide-1", "uploaded-reference-1"}
 
 
 def test_maps_proposals_and_rejects_unknown_citations() -> None:
@@ -121,3 +127,29 @@ def test_maps_proposals_and_rejects_unknown_citations() -> None:
     assert mapped[0]["decision"] == "pending"
     with pytest.raises(GeminiProviderError, match="outside"):
         proposals_as_recommendations(response, profile_version_id="profile-1", allowed_source_ids=set())
+
+
+def test_rejects_superficial_review_and_accepts_complete_coverage() -> None:
+    response = EditorialResponse.model_validate(editorial())
+    with pytest.raises(GeminiProviderError, match="required scientific"):
+        validate_scientific_coverage(response)
+    dimensions = [
+        "scientific-framing",
+        "theory-methodology",
+        "validation-robustness",
+        "results-analysis",
+        "figures-equations",
+        "structure",
+        "writing",
+        "compliance",
+        "scientific-framing",
+        "validation-robustness",
+        "results-analysis",
+        "structure",
+    ]
+    complete = editorial()
+    template = complete["proposals"][0]
+    complete["proposals"] = [
+        {**template, "category": dimension, "anchor": f"page:{index + 1}"} for index, dimension in enumerate(dimensions)
+    ]
+    validate_scientific_coverage(EditorialResponse.model_validate(complete))

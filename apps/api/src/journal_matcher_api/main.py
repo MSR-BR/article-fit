@@ -34,6 +34,7 @@ from journal_matcher_api.gemini import (
     GeminiProviderError,
     build_editorial_prompt,
     proposals_as_recommendations,
+    validate_scientific_coverage,
 )
 from journal_matcher_api.hosted import (
     HostedAnalysisRepository,
@@ -61,7 +62,7 @@ from journal_matcher_api.manuscript_analysis import (
     AnalysisRepository,
     annotate_docx,
     build_recommendations,
-    create_docx,
+    create_pdf_visual_review_docx,
     extract_official_rules,
     scientific_invariants,
     store_artifact_set,
@@ -886,9 +887,11 @@ async def create_ai_review(
         profile_claims=cast(list[dict[str, object]], profile["claims"]),
         official_rules=cast(list[dict[str, object]], analysis["rules"]),
         deterministic_recommendations=cast(list[dict[str, object]], analysis["recommendations"]),
+        reference_article_texts=store.reference_texts(principal, str(analysis["projectId"])),
     )
     try:
         result = GeminiEditorialClient().generate(prompt)
+        validate_scientific_coverage(result.response)
         recommendations = proposals_as_recommendations(
             result.response,
             profile_version_id=str(analysis["profileVersionId"]),
@@ -941,7 +944,9 @@ async def generate_artifacts(
     reconstructed = manuscript["mediaType"] == "application/pdf"
     original = store.read_private_object(principal, str(manuscript["objectKey"]))
     docx = (
-        create_docx(text, recommendations, reconstructed) if reconstructed else annotate_docx(original, recommendations)
+        create_pdf_visual_review_docx(original, recommendations)
+        if reconstructed
+        else annotate_docx(original, recommendations)
     )
     manuscript_title = next(
         (line.strip() for line in text.splitlines() if len(line.strip()) >= 8), "Submitted manuscript"

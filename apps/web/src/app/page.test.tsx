@@ -123,13 +123,7 @@ describe('HomePage', () => {
     expect(
       screen.getByText('Creating the analysis workspace').closest('li'),
     ).toHaveClass('active');
-    await waitFor(() =>
-      expect(
-        screen
-          .getByText('Generating and validating deliverables')
-          .closest('li'),
-      ).toHaveClass('complete'),
-    );
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(
       screen.getByRole('link', { name: /Submission-fit report/ }),
     ).toHaveAttribute(
@@ -187,13 +181,7 @@ describe('HomePage', () => {
       'href',
       '/api/journal-matcher/analyses/analysis-async/artifacts/revision-report.pdf',
     );
-    expect(
-      screen.getByRole('dialog', { name: 'Files ready' }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole('progressbar')).toHaveAttribute(
-      'aria-valuenow',
-      '100',
-    );
+    expect(screen.queryByRole('dialog')).toBeNull();
     expect(screen.queryByText('Continuar em segundo plano')).toBeNull();
     expect(document.querySelector('.spinner')).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(8);

@@ -333,6 +333,7 @@ export default function HomePage() {
       setActiveStep(progressStages.length - 1);
       setRunState('succeeded');
       setStarted(false);
+      setShowProgress(false);
     } catch (caught) {
       if (stopRequested.current) return;
       setError(

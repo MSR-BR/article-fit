@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import re
 import textwrap
+import zlib
 from collections import defaultdict
 from collections.abc import Iterable
 from io import BytesIO
 
+from matplotlib.mathtext import math_to_image
+from PIL import Image
 from pypdf import PdfReader, PdfWriter
 
 NAVY = (0.08, 0.20, 0.36)
@@ -32,7 +35,62 @@ CATEGORY_LABELS = {
     "methodology-reporting": "Methods presentation",
     "scientific-concern": "Scientific-depth question",
     "unresolved": "Author decision",
+    "scientific-framing": "Scientific framing and significance",
+    "theory-methodology": "Theory, methods, and assumptions",
+    "validation-robustness": "Validation, robustness, and limits",
+    "results-analysis": "Results, analysis, and interpretation",
+    "figures-equations": "Figures, equations, and visual evidence",
+    "writing": "Writing, abstract, and conclusion",
 }
+
+
+def _without_raw_latex(value: object) -> str:
+    """Keep generated PDFs readable when the source contains TeX control sequences."""
+    text = str(value or "")
+    replacements = {
+        r"\left": "",
+        r"\right": "",
+        r"\langle": "<",
+        r"\rangle": ">",
+        r"\lambda": "lambda",
+        r"\partial": "partial ",
+        r"\mathrm": "",
+        r"\text": "",
+        r"\frac": "fraction ",
+        "$$": "",
+        r"\[": "",
+        r"\]": "",
+        r"\(": "",
+        r"\)": "",
+    }
+    for source, target in replacements.items():
+        text = text.replace(source, target)
+    text = text.replace("{", "(").replace("}", ")").replace("$", "")
+    return " ".join(text.split())
+
+
+PDF_LATEX_PATTERN = re.compile(r"\$\$(.+?)\$\$|\\\[(.+?)\\\]|\\\((.+?)\\\)|\$(.+?)\$", re.S)
+
+
+def _pdf_latex_parts(value: object) -> tuple[str, list[str]]:
+    text = str(value or "")
+    expressions: list[str] = []
+
+    def replace(match: re.Match[str]) -> str:
+        expression = next((group for group in match.groups() if group is not None), "").strip()
+        if expression:
+            expressions.append(expression)
+        return " [equation rendered below] "
+
+    visible = PDF_LATEX_PATTERN.sub(replace, text)
+    if (
+        not expressions
+        and "\\" in text
+        and any(token in text for token in ("\\frac", "\\left", "\\langle", "\\partial", "\\sum"))
+    ):
+        expressions.append(text.strip())
+        visible = "[equation rendered below]"
+    return " ".join(visible.split()), expressions
 
 
 def _pdf_escape(value: str) -> str:
@@ -55,6 +113,7 @@ class EditorialPdf:
         self.y = 0.0
         self.page_number = 0
         self._title_page = False
+        self.images: list[tuple[int, int, bytes]] = []
 
     @property
     def commands(self) -> list[str]:
@@ -163,7 +222,30 @@ class EditorialPdf:
         self._ensure(30)
         self.text_at(72, self.y, label.upper(), font="F4", size=8.2, color=GRAY)
         self.y -= 13
-        self.paragraph(value, color=value_color, size=9.8, gap=7)
+        visible, expressions = _pdf_latex_parts(value)
+        self.paragraph(_without_raw_latex(visible), color=value_color, size=9.8, gap=7)
+        for expression in expressions:
+            self.math_expression(expression, color=value_color)
+
+    def math_expression(self, expression: str, *, color: tuple[float, float, float] = BLUE) -> None:
+        image = BytesIO()
+        rgb = "#" + "".join(f"{round(channel * 255):02x}" for channel in color)
+        try:
+            math_to_image(f"${expression.strip()}$", image, dpi=180, format="png", color=rgb)
+            rendered = Image.open(BytesIO(image.getvalue())).convert("RGB")
+        except (OSError, RuntimeError, ValueError):
+            self.paragraph(_without_raw_latex(expression), color=color, font="F2", size=9.5)
+            return
+        width_px, height_px = rendered.size
+        width = min(420.0, width_px * 0.4)
+        height = max(16.0, width * height_px / max(width_px, 1))
+        self._ensure(height + 10)
+        name = f"Im{len(self.images) + 1}"
+        self.images.append((width_px, height_px, zlib.compress(rendered.tobytes())))
+        x = 72 + max(0.0, (468 - width) / 2)
+        y = self.y - height
+        self.commands.append(f"q {width:.1f} 0 0 {height:.1f} {x:.1f} {y:.1f} cm /{name} Do Q")
+        self.y = y - 8
 
     def callout(self, title: str, body: object, *, color: tuple[float, float, float] = BLUE) -> None:
         body_text = " ".join(_latin(body).split())
@@ -197,15 +279,25 @@ class EditorialPdf:
         original = str(item.get("originalText") or "").strip()
         if original:
             self.label_value("Current manuscript", original[:1400])
-        self.label_value("What needs improvement", item.get("rationale", ""))
+        expectation = item.get("journalExpectation") or item.get("referencePattern")
+        if expectation:
+            self.label_value("Journal-level expectation", expectation)
+        reference_pattern = item.get("referencePattern")
+        if reference_pattern and reference_pattern != expectation:
+            self.label_value("Observed reference pattern", reference_pattern)
+        self.label_value("Scientific/editorial diagnosis", item.get("rationale", ""))
+        action = item.get("authorAction")
+        if action:
+            self.label_value("What the author should do", action, value_color=BLUE)
         proposed = item.get("modifiedText") or item.get("proposedText")
         if proposed:
             self.label_value("Suggested revision", proposed, value_color=BLUE)
         else:
             self.label_value(
                 "Author action",
-                "Revise this passage following the recommendation above; retain the scientific claim only after "
-                "author verification.",
+                action
+                or "Revise this passage following the recommendation above; retain the scientific claim only "
+                "after author verification.",
                 value_color=BLUE,
             )
         if item.get("scientificImpact") or item.get("authorValidationRequired"):
@@ -229,6 +321,19 @@ class EditorialPdf:
             b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
         ]
         objects.extend(fonts)
+        image_ids: list[int] = []
+        for width, height, compressed in self.images:
+            image_ids.append(len(objects) + 1)
+            objects.append(
+                (
+                    f"<< /Type /XObject /Subtype /Image /Width {width} /Height {height} "
+                    f"/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length {len(compressed)} >>\n"
+                    "stream\n"
+                ).encode()
+                + compressed
+                + b"\nendstream"
+            )
+        xobjects = " ".join(f"/Im{index} {object_id} 0 R" for index, object_id in enumerate(image_ids, 1))
         page_ids: list[int] = []
         for commands in self.pages:
             stream = "\n".join(commands).encode("latin-1", errors="replace")
@@ -239,7 +344,7 @@ class EditorialPdf:
             objects.append(
                 (
                     f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font "
-                    "<< /F1 3 0 R /F2 4 0 R /F3 5 0 R /F4 6 0 R >> >> "
+                    f"<< /F1 3 0 R /F2 4 0 R /F3 5 0 R /F4 6 0 R >> /XObject << {xobjects} >> >> "
                     f"/Contents {content_id} 0 R >>"
                 ).encode()
             )
@@ -363,7 +468,7 @@ def create_editorial_report_pdf(
     pdf.heading("3  Priority action plan")
     for index, item in enumerate(items[:10], 1):
         category = CATEGORY_LABELS.get(str(item.get("category")), str(item.get("category", "Editorial")))
-        action = item.get("proposedText") or item.get("rationale") or "Review this item."
+        action = item.get("authorAction") or item.get("proposedText") or item.get("rationale") or "Review this item."
         pdf.bullet(f"{index}. {category} at {item.get('anchor', 'document')}: {action}")
     if len(items) > 10:
         pdf.paragraph(f"The detailed ledger contains {len(items) - 10} additional recommendations.", color=GRAY)
@@ -380,7 +485,7 @@ def create_editorial_report_pdf(
         key = str(rule.get("key", "official requirement")).replace("-", " ").title()
         pdf.bullet(f"{key}: {status}. The detailed recommendation states the required author action.")
 
-    pdf.heading("5  Journal-pattern comparison")
+    pdf.heading("5  Scientific and editorial comparison")
     categories: dict[str, list[dict[str, object]]] = defaultdict(list)
     for item in items:
         categories[
@@ -393,9 +498,37 @@ def create_editorial_report_pdf(
             "execution and presentation, not similarity of scientific subject matter."
         )
         for item in category_items[:4]:
-            pdf.bullet(f"{item.get('anchor', 'document')}: {item.get('rationale', '')}")
+            pattern = item.get("referencePattern") or item.get("journalExpectation") or "Journal-level execution"
+            pdf.bullet(
+                f"{item.get('anchor', 'document')}: {pattern} Gap: {item.get('rationale', '')} "
+                f"Action: {item.get('authorAction') or item.get('proposedText') or 'Author revision required.'}"
+            )
 
-    pdf.heading("6  Detailed revision ledger")
+    substantive = [
+        item
+        for item in items
+        if str(item.get("interventionType"))
+        in {"new-analysis", "new-measurement", "new-figure", "new-validation", "cut-or-move", "restructure"}
+    ]
+    pdf.heading("6  Substantive scientific and structural work")
+    if substantive:
+        pdf.paragraph(
+            "These are not cosmetic edits. They identify analyses, validation, measurements, figures, cuts, or "
+            "structural moves that the authors should evaluate against the manuscript's actual evidence."
+        )
+        for item in substantive:
+            kind = str(item.get("interventionType", "author action")).replace("-", " ").title()
+            pdf.bullet(
+                f"{kind} at {item.get('anchor', 'document')}: {item.get('authorAction') or item.get('rationale', '')}"
+            )
+    else:
+        pdf.paragraph(
+            "No responsible substantive action was returned. The analysis should be rerun rather than treating "
+            "surface edits as a complete scientific review.",
+            color=RED,
+        )
+
+    pdf.heading("7  Detailed revision ledger")
     pdf.paragraph(
         "Each entry states the location, the observed gap, the action to take, and proposed wording when a "
         "responsible rewrite can be made without inventing scientific content. Blue wording is a suggestion, "
@@ -404,7 +537,7 @@ def create_editorial_report_pdf(
     for index, item in enumerate(items, 1):
         pdf.recommendation(index, item)
 
-    pdf.heading("7  Submission gate")
+    pdf.heading("8  Submission gate")
     pdf.callout(
         "Recommended next pass",
         "Resolve all mandatory items; complete the high-priority architecture and presentation revisions; have "

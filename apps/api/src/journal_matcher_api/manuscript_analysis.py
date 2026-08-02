@@ -6,6 +6,8 @@ import hashlib
 import json
 import re
 import sqlite3
+import subprocess
+import tempfile
 import textwrap
 import uuid
 import xml.etree.ElementTree as ET
@@ -16,9 +18,13 @@ from datetime import UTC, datetime
 from html import escape, unescape
 from io import BytesIO
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
+from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Inches, Pt, RGBColor
 from fastapi import HTTPException
+from matplotlib.mathtext import math_to_image
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
@@ -36,6 +42,12 @@ CATEGORY_COLORS = {
     "methodology-reporting": "548235",
     "scientific-concern": "C00000",
     "unresolved": "666666",
+    "scientific-framing": "2F5597",
+    "theory-methodology": "548235",
+    "validation-robustness": "C00000",
+    "results-analysis": "2F5597",
+    "figures-equations": "7030A0",
+    "writing": "1F4E79",
 }
 
 
@@ -688,6 +700,166 @@ class AnalysisRepository:
         return str(row[0])
 
 
+LATEX_PATTERN = re.compile(r"\$\$(.+?)\$\$|\\\[(.+?)\\\]|\\\((.+?)\\\)|\$(.+?)\$", re.S)
+
+
+def _latex_parts(value: object) -> tuple[str, list[str]]:
+    text = str(value or "")
+    expressions: list[str] = []
+
+    def replace(match: re.Match[str]) -> str:
+        expression = next((group for group in match.groups() if group is not None), "").strip()
+        if expression:
+            expressions.append(expression)
+            return " [equation rendered below] "
+        return ""
+
+    visible = LATEX_PATTERN.sub(replace, text)
+    if (
+        not expressions
+        and "\\" in text
+        and any(token in text for token in ("\\frac", "\\left", "\\right", "\\langle", "\\partial", "\\sum"))
+    ):
+        expressions.append(text.strip())
+        visible = "[equation rendered below]"
+    return " ".join(visible.split()), expressions
+
+
+def _math_png(expression: str, *, color: str = "#1f4e79") -> BytesIO | None:
+    value = expression.strip().replace("\n", " ")
+    if not value or len(value) > 2_000:
+        return None
+    output = BytesIO()
+    try:
+        math_to_image(f"${value}$", output, dpi=180, format="png", color=color)
+    except (ValueError, RuntimeError):
+        return None
+    output.seek(0)
+    return output
+
+
+def _add_review_value(document: Any, label: str, value: object, *, blue: bool = False) -> None:
+    heading = document.add_paragraph()
+    heading.paragraph_format.space_before = Pt(7)
+    heading.paragraph_format.space_after = Pt(2)
+    label_run = heading.add_run(label.upper())
+    label_run.bold = True
+    label_run.font.size = Pt(8)
+    label_run.font.color.rgb = RGBColor(95, 102, 105)
+    visible, expressions = _latex_parts(value)
+    paragraph = document.add_paragraph()
+    paragraph.paragraph_format.space_after = Pt(5)
+    run = paragraph.add_run(visible or "—")
+    run.font.size = Pt(10)
+    run.font.color.rgb = RGBColor(31, 78, 121) if blue else RGBColor(0, 0, 0)
+    for expression in expressions:
+        image = _math_png(expression)
+        if image is not None:
+            equation = document.add_paragraph()
+            equation.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            equation.add_run().add_picture(image, width=Inches(5.8))
+
+
+def _add_suggestion_page(document: Any, title: str, items: list[dict[str, object]]) -> None:
+    title_paragraph = document.add_paragraph()
+    title_run = title_paragraph.add_run(title)
+    title_run.bold = True
+    title_run.font.size = Pt(18)
+    title_run.font.color.rgb = RGBColor(11, 63, 92)
+    notice = document.add_paragraph(
+        "The preceding page is the unchanged original manuscript. Suggestions on this page are color-coded blue; "
+        "scientific changes require author validation."
+    )
+    notice.runs[0].italic = True
+    notice.runs[0].font.color.rgb = RGBColor(95, 102, 105)
+    for index, item in enumerate(items, 1):
+        heading = document.add_paragraph()
+        heading.paragraph_format.space_before = Pt(12)
+        dimension = str(item.get("reviewDimension") or item.get("category") or "Editorial review")
+        run = heading.add_run(f"{index}. {dimension.replace('-', ' ').title()}")
+        run.bold = True
+        run.font.size = Pt(13)
+        run.font.color.rgb = RGBColor(31, 78, 121)
+        _add_review_value(document, "Current manuscript", item.get("originalText"))
+        _add_review_value(
+            document,
+            "Journal/reference pattern",
+            item.get("referencePattern") or item.get("journalExpectation") or item.get("basis"),
+        )
+        _add_review_value(document, "Why this matters", item.get("rationale"))
+        _add_review_value(
+            document,
+            "Author action",
+            item.get("authorAction") or item.get("proposedText") or item.get("rationale"),
+            blue=True,
+        )
+        if item.get("proposedText"):
+            _add_review_value(document, "Suggested wording", item.get("proposedText"), blue=True)
+        if item.get("scientificImpact") or item.get("authorValidationRequired"):
+            warning = document.add_paragraph("Author validation required before this scientific change is adopted.")
+            warning.runs[0].bold = True
+            warning.runs[0].font.color.rgb = RGBColor(176, 31, 31)
+
+
+def create_pdf_visual_review_docx(original_pdf: bytes, recommendations: list[dict[str, object]]) -> bytes:
+    """Preserve a PDF manuscript as source-page images and interleave readable blue review pages."""
+    try:
+        reader = PdfReader(BytesIO(original_pdf), strict=False)
+    except PdfReadError as error:
+        raise HTTPException(status_code=422, detail="Original PDF cannot be rendered safely") from error
+    if not reader.pages:
+        raise HTTPException(status_code=422, detail="Original PDF contains no pages")
+    visible = [item for item in recommendations if item.get("decision") != "rejected"]
+    by_page: dict[int, list[dict[str, object]]] = {}
+    unanchored: list[dict[str, object]] = []
+    for item in visible:
+        match = re.fullmatch(r"page:(\d+)", str(item.get("anchor", "")))
+        if match and 1 <= int(match.group(1)) <= len(reader.pages):
+            by_page.setdefault(int(match.group(1)), []).append(item)
+        else:
+            unanchored.append(item)
+    document = Document()
+    section = document.sections[0]
+    section.top_margin = Inches(0.32)
+    section.bottom_margin = Inches(0.32)
+    section.left_margin = Inches(0.35)
+    section.right_margin = Inches(0.35)
+    with tempfile.TemporaryDirectory(prefix="article-fit-pdf-") as folder:
+        source_path = Path(folder) / "source.pdf"
+        source_path.write_bytes(original_pdf)
+        prefix = Path(folder) / "page"
+        try:
+            subprocess.run(
+                ["pdftoppm", "-jpeg", "-r", "150", "-jpegopt", "quality=88", str(source_path), str(prefix)],
+                check=True,
+                capture_output=True,
+                timeout=120,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            raise HTTPException(status_code=500, detail="PDF source pages could not be rendered") from error
+        pages = sorted(Path(folder).glob("page-*.jpg"))
+        if len(pages) != len(reader.pages):
+            raise HTTPException(status_code=500, detail="PDF source-page rendering was incomplete")
+        for page_number, image_path in enumerate(pages, 1):
+            paragraph = document.add_paragraph()
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            paragraph.paragraph_format.space_after = Pt(0)
+            paragraph.add_run().add_picture(str(image_path), width=Inches(7.75))
+            document.add_page_break()  # type: ignore[no-untyped-call]
+            if by_page.get(page_number):
+                _add_suggestion_page(
+                    document,
+                    f"Article Fit suggestions for source page {page_number}",
+                    by_page[page_number],
+                )
+                document.add_page_break()  # type: ignore[no-untyped-call]
+        if unanchored:
+            _add_suggestion_page(document, "Article Fit manuscript-level suggestions", unanchored)
+    output = BytesIO()
+    document.save(output)
+    return output.getvalue()
+
+
 def create_docx(text: str, recommendations: list[dict[str, object]], reconstructed: bool) -> bytes:
     paragraphs = [part.strip() for part in text.splitlines() if part.strip()] or ["No extractable manuscript text."]
     section_names = {"abstract", "introduction", "methods", "results", "discussion", "conclusion", "references"}
@@ -789,9 +961,10 @@ def annotate_docx(original: bytes, recommendations: list[dict[str, object]]) -> 
             logical_index += 1
             for item in anchored.get(logical_index, []):
                 proposed = item.get("modifiedText") or item.get("proposedText") or item.get("rationale")
+                visible_proposed, _ = _latex_parts(proposed)
                 rebuilt.append(
                     _word_paragraph(
-                        f"ARTICLE FIT SUGGESTION [{item['category']}]: {proposed}",
+                        f"ARTICLE FIT SUGGESTION [{item['category']}]: {visible_proposed}",
                         color=CATEGORY_COLORS.get(str(item["category"]), "1F4E79"),
                     )
                 )
@@ -803,8 +976,9 @@ def annotate_docx(original: bytes, recommendations: list[dict[str, object]]) -> 
         notes += _word_paragraph("Article Fit — manuscript-level suggestions", color="2E74B5", bold=True)
     for item in unanchored:
         proposed = item.get("modifiedText") or item.get("proposedText") or item.get("rationale")
+        visible_proposed, _ = _latex_parts(proposed)
         notes += _word_paragraph(
-            f"ARTICLE FIT SUGGESTION [{item['category']}] {item['anchor']}: {proposed}",
+            f"ARTICLE FIT SUGGESTION [{item['category']}] {item['anchor']}: {visible_proposed}",
             color=CATEGORY_COLORS.get(str(item["category"]), "1F4E79"),
         )
     insertion = document.rfind("<w:sectPr")
@@ -833,7 +1007,31 @@ def annotate_docx(original: bytes, recommendations: list[dict[str, object]]) -> 
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as target:
         for name, content in entries.items():
             target.writestr(name, content)
-    return output.getvalue()
+    annotated = output.getvalue()
+    rendered_equations: list[tuple[str, str]] = []
+    for item in visible:
+        proposed = item.get("modifiedText") or item.get("proposedText") or item.get("rationale")
+        _, expressions = _latex_parts(proposed)
+        rendered_equations.extend((str(item.get("anchor", "document")), expression) for expression in expressions)
+    if not rendered_equations:
+        return annotated
+    document_with_math = Document(BytesIO(annotated))
+    heading = document_with_math.add_paragraph()
+    run = heading.add_run("Article Fit — rendered equations in suggested revisions")
+    run.bold = True
+    run.font.color.rgb = RGBColor(31, 78, 121)
+    for anchor, expression in rendered_equations:
+        image = _math_png(expression)
+        if image is None:
+            continue
+        paragraph = document_with_math.add_paragraph(anchor)
+        paragraph.runs[0].font.color.rgb = RGBColor(95, 102, 105)
+        equation = document_with_math.add_paragraph()
+        equation.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        equation.add_run().add_picture(image, width=Inches(5.8))
+    rendered = BytesIO()
+    document_with_math.save(rendered)
+    return rendered.getvalue()
 
 
 def validate_invariant_preservation(original: str, revised: str) -> None:
@@ -864,9 +1062,18 @@ def validate_proposal_parity(docx: bytes, revised_pdf: bytes, recommendations: l
     for item in recommendations:
         if item.get("decision") == "rejected":
             continue
-        proposal = str(item.get("modifiedText") or item.get("proposedText") or item.get("rationale"))
-        probe = " ".join(proposal.split())[:80]
-        if probe not in normalized_docx or probe not in normalized_pdf:
+        candidates = [
+            str(value)
+            for value in (
+                item.get("authorAction"),
+                item.get("modifiedText"),
+                item.get("proposedText"),
+                item.get("rationale"),
+            )
+            if value
+        ]
+        probes = [" ".join(candidate.split())[:80] for candidate in candidates]
+        if not any(probe in normalized_docx and probe in normalized_pdf for probe in probes):
             raise HTTPException(status_code=500, detail="DOCX/PDF recommendation parity validation failed")
 
 

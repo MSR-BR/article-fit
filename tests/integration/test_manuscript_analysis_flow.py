@@ -9,6 +9,42 @@ from tests.conftest import auth
 from tests.integration.test_journal_research_flow import FakeProvider, prepare_project
 
 
+def complete_editorial_proposals(anchor: str) -> list[dict[str, object]]:
+    dimensions = [
+        "scientific-framing",
+        "theory-methodology",
+        "validation-robustness",
+        "results-analysis",
+        "figures-equations",
+        "structure",
+        "writing",
+        "compliance",
+        "scientific-framing",
+        "validation-robustness",
+        "results-analysis",
+        "structure",
+    ]
+    return [
+        {
+            "anchor": anchor,
+            "category": dimension,
+            "interventionType": "restructure",
+            "priority": "medium",
+            "basis": "expert-suggestion",
+            "originalText": "Synthetic article",
+            "proposedText": "Synthetic article: central result",
+            "rationale": "Foreground the principal result and its evidential support.",
+            "action": "Revise this dimension after author verification.",
+            "journalExpectation": "A concise, evidence-led scientific argument.",
+            "referencePattern": "Reference articles connect claims directly to methods and results.",
+            "sourceIds": [],
+            "scientificImpact": True,
+            "authorValidationRequired": True,
+        }
+        for dimension in dimensions
+    ]
+
+
 def create_profile(client: TestClient, project_id: str) -> str:
     response = client.post(
         f"/v1/projects/{project_id}/research",
@@ -46,21 +82,7 @@ def test_analysis_review_artifacts_and_tenant_isolation(
                 response=EditorialResponse.model_validate(
                     {
                         "summary": "The manuscript needs a clearer editorial architecture.",
-                        "proposals": [
-                            {
-                                "anchor": "page:1",
-                                "category": "structure",
-                                "priority": "medium",
-                                "basis": "expert-suggestion",
-                                "originalText": "Synthetic article",
-                                "proposedText": "Synthetic article: central result",
-                                "rationale": "Foreground the principal result.",
-                                "action": "Revise the title after author verification.",
-                                "sourceIds": [],
-                                "scientificImpact": True,
-                                "authorValidationRequired": True,
-                            }
-                        ],
+                        "proposals": complete_editorial_proposals("page:1"),
                         "limitations": ["AI-assisted review requires author validation."],
                     }
                 ),
@@ -142,21 +164,7 @@ def test_real_workflow_orchestrator_reaches_downloadable_artifacts(
                 response=EditorialResponse.model_validate(
                     {
                         "summary": "Editorial review completed.",
-                        "proposals": [
-                            {
-                                "anchor": "paragraph:1",
-                                "category": "language",
-                                "priority": "low",
-                                "basis": "expert-suggestion",
-                                "originalText": "Synthetic manuscript",
-                                "proposedText": "Synthetic manuscript with a clearer central result.",
-                                "rationale": "Improve clarity.",
-                                "action": "Verify and revise the opening.",
-                                "sourceIds": [],
-                                "scientificImpact": False,
-                                "authorValidationRequired": False,
-                            }
-                        ],
+                        "proposals": complete_editorial_proposals("paragraph:1"),
                         "limitations": ["AI-assisted editorial review."],
                     }
                 ),
