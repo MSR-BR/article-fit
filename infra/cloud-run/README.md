@@ -28,7 +28,7 @@ isolation, artifact download, deletion, and synthetic end-to-end tests pass.
 ## Open MVP and retention
 
 - Set `JOURNAL_MATCHER_PUBLIC_MVP=true` only on the API. The browser still reaches it through Vercel, which supplies the server-only internal credential and fixed workspace.
-- The worker job processes durable queue messages. The separate `article-fit-retention` job uses the same image and service account with `--purge-expired`.
+- The worker job processes durable queue messages. The separate `article-fit-retention` job uses the same image and service account with `--purge-expired`; it also removes audit events older than 30 days.
 - Cloud Scheduler invokes `article-fit-retention` hourly with an OIDC-authenticated request. The 24-hour window is a maximum; source files are normally deleted much earlier at terminal processing.
 - Superseded journal-memory revisions are pruned when no temporary analysis still references them. One current head remains per journal.
 

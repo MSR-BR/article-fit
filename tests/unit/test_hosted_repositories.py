@@ -401,12 +401,13 @@ def test_hosted_delete_and_retention(monkeypatch: pytest.MonkeyPatch) -> None:
     store.delete_project(PRINCIPAL, str(project_row()["id"]))
     assert client.deletions == [("manuscripts", [object_key])]
 
-    expired = ScriptedClient([[{"id": "old", "workspace_id": WORKSPACE, "owner_id": "pilot-user"}]])
+    expired = ScriptedClient([[{"id": "old", "workspace_id": WORKSPACE, "owner_id": "pilot-user"}], None])
     retention_store = HostedFoundationStore(expired)  # type: ignore[arg-type]
     deleted: list[str] = []
     monkeypatch.setattr(retention_store, "delete_project", lambda principal, project_id: deleted.append(project_id))
     assert retention_store.purge_expired() == 1
     assert deleted == ["old"]
+    assert ("audit_events", "DELETE") in expired.calls
 
 
 def test_hosted_source_documents_are_hard_deleted() -> None:

@@ -311,6 +311,8 @@ export default function HomePage() {
       if (!workflow.analysisId && workflow.id) {
         context.jobId = workflow.id;
         let connectionFailures = 0;
+        let lastConfirmedProgress = 25;
+        let nextPollDelayMs = 2000;
         for (let attempt = 0; attempt < 300; attempt += 1) {
           let job: JobStatus;
           try {
@@ -341,6 +343,15 @@ export default function HomePage() {
           setActiveStep((current) =>
             Math.max(current, stageIndex(job.progress, job.stage)),
           );
+          if (job.progress > lastConfirmedProgress) {
+            nextPollDelayMs = 2000;
+          } else {
+            nextPollDelayMs = Math.min(
+              10000,
+              Math.round(nextPollDelayMs * 1.5),
+            );
+          }
+          lastConfirmedProgress = Math.max(lastConfirmedProgress, job.progress);
           if (job.state === 'failed' || job.state === 'cancelled') {
             throw new Error(workflowError(job));
           }
@@ -357,7 +368,9 @@ export default function HomePage() {
             };
             break;
           }
-          await new Promise((resolve) => window.setTimeout(resolve, 2000));
+          await new Promise((resolve) =>
+            window.setTimeout(resolve, nextPollDelayMs),
+          );
         }
       }
       if (!workflow.analysisId || !workflow.artifacts) {

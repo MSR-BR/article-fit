@@ -723,6 +723,11 @@ class HostedFoundationStore:
         rows = require_rows(self.client.table("projects", query=query))
         for row in rows:
             self.delete_project(Principal(str(row["owner_id"]), str(row["workspace_id"])), str(row["id"]))
+        audit_cutoff = (datetime.now(UTC) - timedelta(days=30)).isoformat()
+        audit_query = {"created_at": f"lt.{audit_cutoff}"}
+        if workspace_id is not None:
+            audit_query["workspace_id"] = f"eq.{workspace_id}"
+        self.client.table("audit_events", method="DELETE", query=audit_query)
         return len(rows)
 
 
