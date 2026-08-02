@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 from journal_matcher_api import main
-from journal_matcher_api.foundation import FoundationStore
+from journal_matcher_api.foundation import FoundationStore, Principal
 from journal_matcher_api.gemini import EditorialResponse, GeminiResult
 
 from tests.conftest import auth
@@ -115,7 +115,9 @@ def test_analysis_review_artifacts_and_tenant_isolation(
     assert client.get(f"/v1/analyses/{analysis['id']}", headers=auth()).status_code == 404
 
 
-def test_real_workflow_orchestrator_reaches_downloadable_artifacts(client: TestClient, monkeypatch) -> None:
+def test_real_workflow_orchestrator_reaches_downloadable_artifacts(
+    client: TestClient, store: FoundationStore, monkeypatch
+) -> None:
     class WorkflowProvider(FakeProvider):
         def get(self, url: str, *, allowed_domain: str | None = None) -> bytes:
             if "api.openalex.org/sources" in url:
@@ -180,5 +182,13 @@ def test_real_workflow_orchestrator_reaches_downloadable_artifacts(client: TestC
     assert workflow["state"] == "succeeded"
     assert workflow["stage"] == "artifacts-ready"
     assert len(workflow["artifacts"]) == 4
+    assert (
+        store.get_project(Principal("invited-pilot-user", "11111111-1111-4111-8111-111111111111"), project_id)[
+            "documents"
+        ]
+        == []
+    )
+    profile_id = str(workflow["research"]["profileVersion"]["id"])
+    assert main.profile_repository(store).official_snapshots(profile_id) == []
     for kind in ("revised-manuscript.docx", "revised-manuscript.pdf", "revision-report.pdf"):
         assert client.get(f"/v1/analyses/{workflow['analysisId']}/artifacts/{kind}", headers=auth()).status_code == 200

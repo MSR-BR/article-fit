@@ -1,35 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import HomePage from './page';
-
-const {
-  exchangeCodeForSession,
-  getUser,
-  onAuthStateChange,
-  setSession,
-  signOut,
-  verifyOtp,
-} = vi.hoisted(() => ({
-  exchangeCodeForSession: vi.fn(),
-  getUser: vi.fn(),
-  onAuthStateChange: vi.fn(),
-  setSession: vi.fn(),
-  signOut: vi.fn(),
-  verifyOtp: vi.fn(),
-}));
-
-vi.mock('../lib/supabase/client', () => ({
-  createClient: () => ({
-    auth: {
-      exchangeCodeForSession,
-      getUser,
-      onAuthStateChange,
-      setSession,
-      signOut,
-      verifyOtp,
-    },
-  }),
-}));
 
 function jsonResponse(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
@@ -64,40 +35,18 @@ function completePackage() {
 }
 
 describe('HomePage', () => {
-  beforeEach(() => {
-    getUser.mockReset();
-    onAuthStateChange.mockReset();
-    signOut.mockReset();
-    onAuthStateChange.mockReturnValue({
-      data: { subscription: { unsubscribe: vi.fn() } },
-    });
-    getUser.mockResolvedValue({
-      data: { user: { email: 'pilot@example.com' } },
-    });
-    signOut.mockResolvedValue({ error: null });
-  });
   afterEach(() => vi.unstubAllGlobals());
 
-  it('blocks the upload interface until a named session is verified', async () => {
-    getUser.mockResolvedValue({ data: { user: null } });
+  it('opens the MVP upload interface without a login gate', () => {
     render(<HomePage />);
-    expect(screen.getByRole('status')).toHaveTextContent('Verificando acesso');
     expect(
-      await screen.findByRole('heading', { name: 'Acesso ao Article Fit' }),
+      screen.getByRole('heading', { name: 'Do rascunho à submissão.' }),
     ).toBeInTheDocument();
-    expect(screen.queryByLabelText('Revista-alvo')).not.toBeInTheDocument();
-  });
-
-  it('signs out and returns to the invitation gate', async () => {
-    render(<HomePage initialUserEmail="pilot@example.com" />);
-    fireEvent.click(screen.getByRole('button', { name: 'Sair' }));
-    expect(
-      await screen.findByRole('heading', { name: 'Acesso ao Article Fit' }),
-    ).toBeInTheDocument();
-    expect(signOut).toHaveBeenCalledOnce();
+    expect(screen.getByLabelText('Revista-alvo')).toBeInTheDocument();
+    expect(screen.queryByText(/Acesso ao Article Fit/)).not.toBeInTheDocument();
   });
   it('shows only the two document inputs and the concise explanation', () => {
-    render(<HomePage initialUserEmail="pilot@example.com" />);
+    render(<HomePage />);
 
     expect(
       screen.getByRole('heading', { name: 'Do rascunho à submissão.' }),
@@ -136,7 +85,7 @@ describe('HomePage', () => {
         }),
       );
     vi.stubGlobal('fetch', fetchMock);
-    render(<HomePage initialUserEmail="pilot@example.com" />);
+    render(<HomePage />);
     completePackage();
 
     const startButton = screen.getByRole('button', { name: 'Iniciar análise' });
@@ -172,7 +121,7 @@ describe('HomePage', () => {
   });
 
   it('asks for the remaining orientation articles', () => {
-    render(<HomePage initialUserEmail="pilot@example.com" />);
+    render(<HomePage />);
     fireEvent.change(screen.getByLabelText('Revista-alvo'), {
       target: { value: 'Physical Review Letters' },
     });
@@ -187,7 +136,7 @@ describe('HomePage', () => {
   });
 
   it('keeps analysis disabled until the target journal is informed', () => {
-    render(<HomePage initialUserEmail="pilot@example.com" />);
+    render(<HomePage />);
     const references = [1, 2, 3].map(
       (index) =>
         new File(['pdf'], `r-${index}.pdf`, { type: 'application/pdf' }),
@@ -219,7 +168,7 @@ describe('HomePage', () => {
           }),
       ),
     );
-    render(<HomePage initialUserEmail="pilot@example.com" />);
+    render(<HomePage />);
     completePackage();
     fireEvent.click(screen.getByRole('button', { name: 'Iniciar análise' }));
     expect(screen.getByText('Criando o projeto').closest('li')).toHaveClass(
@@ -251,7 +200,7 @@ describe('HomePage', () => {
           ),
         ),
     );
-    render(<HomePage initialUserEmail="pilot@example.com" />);
+    render(<HomePage />);
     completePackage();
     fireEvent.click(screen.getByRole('button', { name: 'Iniciar análise' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -266,7 +215,7 @@ describe('HomePage', () => {
   });
 
   it('requires a complete assisted official-guidance package', () => {
-    render(<HomePage initialUserEmail="pilot@example.com" />);
+    render(<HomePage />);
     completePackage();
     fireEvent.change(screen.getByLabelText('URL oficial do escopo'), {
       target: { value: 'https://journals.aps.org/prl/about' },

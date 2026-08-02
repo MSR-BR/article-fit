@@ -3,15 +3,16 @@
 ## Product rules
 
 1. Never promise journal acceptance or present a recommendation as editorial certainty.
-2. Preserve the original manuscript as an immutable version. All edits create a new version.
+2. Preserve the original manuscript only in memory/private temporary storage while generating a separate edited output; do not retain the original after terminal processing.
 3. A user can inspect, accept, reject, or modify every proposed change.
 4. Scientific-content changes are visibly distinguished from language, structure, layout, and compliance changes.
 5. Never invent data, analyses, citations, quotations, DOIs, journal rules, or article access locations.
 6. Never bypass paywalls, authentication, robots restrictions, licenses, or provider terms.
 7. Official author instructions take priority over inferred article patterns. Conflicts are reported, not silently resolved.
 8. The system must disclose source coverage, retrieval dates, profile version, and confidence.
-9. Cross-user learning is limited to versioned, derived journal knowledge backed by permissible sources. Private raw content is not shared.
-10. The system must support deletion and retention controls before accepting production manuscripts.
+9. Cross-run learning is journal-scoped and limited to versioned, derived conclusions backed by permissible sources. Private raw content, filenames, hashes, and source identifiers are neither shared nor retained.
+10. Uploaded originals and extracted private text are hard-deleted on terminal processing; private outputs and orphaned uploads are hard-deleted within 24 hours.
+11. The MVP has no end-user login. The public browser reaches data services only through a server-side proxy protected by an internal credential.
 
 ## Specification-driven workflow
 

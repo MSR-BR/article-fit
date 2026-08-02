@@ -2,6 +2,7 @@ from pathlib import Path
 
 MIGRATION = Path("db/migrations/0005_hosted_pilot_security.sql")
 QUEUE_MIGRATION = Path("db/migrations/0006_durable_queue_api.sql")
+OPEN_MVP_MIGRATION = Path("db/migrations/0007_open_mvp_ephemeral_storage.sql")
 
 
 def test_hosted_migration_keeps_storage_private_and_bounded() -> None:
@@ -54,3 +55,14 @@ def test_queue_rpc_is_service_role_only() -> None:
     assert "grant execute on function pgmq_public.delete(text, bigint) to service_role" in sql
     assert "alter table journal_source_snapshots enable row level security" in sql
     assert "revoke all on journal_source_snapshots from anon, authenticated" in sql
+
+
+def test_open_mvp_closes_legacy_browser_access_and_marks_ephemeral_rows() -> None:
+    sql = OPEN_MVP_MIGRATION.read_text().lower()
+
+    assert "drop policy if exists private_workspace_objects_read on storage.objects" in sql
+    assert "analysis_artifacts from anon, authenticated" in sql
+    assert "projects_ephemeral_purge_idx" in sql
+    assert "hard-delete at terminal processing or within 24 hours" in sql
+    assert "never store uploaded bytes, private text, filenames, or private hashes" in sql
+    assert "delete from storage.objects" not in sql

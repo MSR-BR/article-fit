@@ -1,9 +1,6 @@
 'use client';
 
-import { ChangeEvent, useEffect, useMemo, useState } from 'react';
-import { createClient } from '../lib/supabase/client';
-import { completeEmailLogin } from '../lib/supabase/complete-email-login';
-import { SignIn } from './sign-in';
+import { ChangeEvent, useMemo, useState } from 'react';
 
 type UploadState = {
   references: File[];
@@ -52,13 +49,7 @@ function FileSummary({ files }: { files: File[] }) {
   );
 }
 
-export default function HomePage({
-  initialUserEmail,
-}: { initialUserEmail?: string | null } = {}) {
-  const [authEmail, setAuthEmail] = useState<string | null | undefined>(
-    initialUserEmail,
-  );
-  const [authMessage, setAuthMessage] = useState('');
+export default function HomePage() {
   const [uploads, setUploads] = useState<UploadState>({
     references: [],
     manuscript: null,
@@ -76,42 +67,6 @@ export default function HomePage({
     scopeSnapshot: '',
     guideSnapshot: '',
   });
-
-  useEffect(() => {
-    if (initialUserEmail !== undefined) return;
-    let active = true;
-    const client = createClient();
-    const listener = client.auth.onAuthStateChange((_event, session) => {
-      if (active && session?.user.email) {
-        setAuthEmail(session.user.email);
-        setAuthMessage('');
-      }
-    });
-    completeEmailLogin(client, window.location.href)
-      .then((result) => {
-        if (!active) return;
-        if (result.callbackFound) {
-          window.history.replaceState(
-            {},
-            document.title,
-            window.location.pathname,
-          );
-        }
-        setAuthEmail(result.email);
-        setAuthMessage(
-          result.error && result.callbackFound
-            ? 'O link não pôde ser confirmado. Solicite um novo link de acesso.'
-            : '',
-        );
-      })
-      .catch(() => {
-        if (active) setAuthEmail(null);
-      });
-    return () => {
-      active = false;
-      listener.data.subscription.unsubscribe();
-    };
-  }, [initialUserEmail]);
 
   const assistedValues = Object.values(guidance).map((value) => value.trim());
   const assistedStarted = assistedValues.some(Boolean);
@@ -260,25 +215,6 @@ export default function HomePage({
     }));
   }
 
-  async function signOut() {
-    await createClient().auth.signOut();
-    setAuthEmail(null);
-  }
-
-  if (authEmail === undefined) {
-    return (
-      <main className="auth-shell">
-        <p className="auth-loading" role="status">
-          <span className="spinner" aria-hidden="true" /> Verificando acesso…
-        </p>
-      </main>
-    );
-  }
-
-  if (authEmail === null) {
-    return <SignIn initialMessage={authMessage} onSignedIn={setAuthEmail} />;
-  }
-
   return (
     <main>
       <header className="brand" aria-label="Article Fit">
@@ -288,12 +224,6 @@ export default function HomePage({
           </span>
           <span>Article Fit</span>
         </span>
-        <span className="account">
-          <span>{authEmail}</span>
-          <button type="button" onClick={signOut}>
-            Sair
-          </button>
-        </span>
       </header>
 
       <section className="intro" aria-labelledby="page-title">
@@ -302,7 +232,8 @@ export default function HomePage({
         <p className="lede">
           Informe a revista, envie artigos de orientação e o seu manuscrito. O
           Article Fit aprende o padrão editorial e entrega uma revisão de forma
-          e conteúdo.
+          e conteúdo. Os documentos enviados são temporários e não entram na
+          memória da revista.
         </p>
       </section>
 
@@ -588,8 +519,8 @@ export default function HomePage({
       </section>
 
       <footer>
-        Seus arquivos serão privados e usados somente para preparar esta
-        revisão.
+        Os originais são eliminados após o processamento. Os arquivos de saída
+        ficam disponíveis temporariamente por até 24 horas.
       </footer>
     </main>
   );

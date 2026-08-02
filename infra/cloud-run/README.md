@@ -22,15 +22,23 @@ server environment variables. The service-role key must never use a `NEXT_PUBLIC
 
 ## Release gate
 
-Do not apply these manifests until migration `0006`, hosted repository parity, queue recovery, tenant
+Do not apply these manifests until migration `0007`, hosted repository parity, queue recovery, ephemeral
 isolation, artifact download, deletion, and synthetic end-to-end tests pass.
+
+## Open MVP and retention
+
+- Set `JOURNAL_MATCHER_PUBLIC_MVP=true` only on the API. The browser still reaches it through Vercel, which supplies the server-only internal credential and fixed workspace.
+- The worker job processes durable queue messages. The separate `article-fit-retention` job uses the same image and service account with `--purge-expired`.
+- Cloud Scheduler invokes `article-fit-retention` hourly with an OIDC-authenticated request. The 24-hour window is a maximum; source files are normally deleted much earlier at terminal processing.
+- Superseded journal-memory revisions are pruned when no temporary analysis still references them. One current head remains per journal.
 
 ## Verified pilot deployment
 
-- API: `https://article-fit-api-468465260392.us-east1.run.app`, revision `article-fit-api-00004-hl2`.
-- Worker: Cloud Run Job `article-fit-worker`, image tag `c12-20260801-1`.
-- Frontend: `https://article-fit.vercel.app`, production deployment `dpl_2EVNhNHxU6wrpgXwyjppqxJmB4Xv`.
+- API: `https://article-fit-api-xstipge7eq-ue.a.run.app`, revision `article-fit-api-00005-7tf` at 100% traffic.
+- Worker: Cloud Run Job `article-fit-worker`, image tag `c13-20260802-1`; health execution `article-fit-worker-rmgmr` completed successfully.
+- Retention: Cloud Run Job `article-fit-retention`; manual execution `article-fit-retention-h5tnh` and scheduled execution `article-fit-retention-2bf8j` completed successfully.
+- Scheduler: `article-fit-retention-hourly`, enabled in `us-east1`, schedule `17 * * * *`, timezone `America/Sao_Paulo`.
+- Frontend: `https://article-fit.vercel.app`, production deployment `dpl_FxJWgLaw3dgUNfPSonUCATWZqNVC`.
 - API service scaling: minimum zero (default), maximum one, concurrency four, timeout 300 seconds.
-- Final worker health-check execution: `article-fit-worker-4rs5w`.
-- Rollback drill: revision 2 to revision 1 and back to revision 2, with health and Vercel proxy checks passing.
-- Named access: public/anonymous sign-up disabled; owner OTP identity and workspace membership verified by the Vercel proxy and API.
+- Rollback target: retained API revision `article-fit-api-00004-hl2`.
+- Access: the public MVP has no end-user login; Vercel supplies the server-only credential and direct unauthenticated API access remains blocked.

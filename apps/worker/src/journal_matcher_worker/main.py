@@ -43,6 +43,11 @@ def process_message(store: HostedFoundationStore, queue_row: dict[str, Any]) -> 
         return False
     job = store.worker_job(job_id)
     if job is None or job.get("state") in {"cancelled", "succeeded", "failed"}:
+        if job is not None and job.get("state") in {"cancelled", "failed"}:
+            store.delete_source_documents(
+                Principal(user_id="article-fit-worker", workspace_id=str(job["workspace_id"])),
+                str(job["project_id"]),
+            )
         store.delete_queue_message(message_id)
         return True
     claimed = store.update_worker_job(
@@ -69,6 +74,10 @@ def process_message(store: HostedFoundationStore, queue_row: dict[str, Any]) -> 
             retry_eligible=not terminal,
         )
         if terminal:
+            store.delete_source_documents(
+                Principal(user_id="article-fit-worker", workspace_id=str(claimed["workspace_id"])),
+                str(claimed["project_id"]),
+            )
             store.delete_queue_message(message_id)
         return False
     if result.get("state") != "succeeded":

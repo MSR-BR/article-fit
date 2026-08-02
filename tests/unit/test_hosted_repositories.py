@@ -149,12 +149,19 @@ def test_job_queue_idempotency_cancel_and_not_found(monkeypatch: pytest.MonkeyPa
     store = HostedFoundationStore(client)  # type: ignore[arg-type]
     monkeypatch.setattr(store, "get_project", lambda *args: {"readyForResearch": True})
     monkeypatch.setattr(store, "audit", lambda *args, **kwargs: None)
+    cleaned_projects: list[str] = []
+    monkeypatch.setattr(
+        store,
+        "delete_source_documents",
+        lambda principal, project_id: cleaned_projects.append(project_id) or 0,
+    )
 
     queued = store.start_job(PRINCIPAL, str(project_row()["id"]), "request-key")
     cancelled = store.cancel_job(PRINCIPAL, str(queued["id"]))
 
     assert queued["state"] == "queued"
     assert cancelled["state"] == "cancelled"
+    assert cleaned_projects == [str(project_row()["id"])]
     assert client.rpcs == [("send", "pgmq_public")]
     missing = HostedFoundationStore(ScriptedClient([[]]))  # type: ignore[arg-type]
     with pytest.raises(HTTPException, match="Job not found"):
@@ -223,11 +230,26 @@ def test_profile_publish_and_snapshots() -> None:
         "created_at": "now",
         "supersedes_id": None,
     }
-    client = ScriptedClient([[], None, None, None, [stored], [stored], [{"source_id": guide.source_id}]])
+    client = ScriptedClient(
+        [
+            [],
+            None,
+            None,
+            None,
+            [stored],
+            [stored],
+            [{"source_id": guide.source_id}],
+            [{"version": 1}],
+            None,
+        ]
+    )
     repository = HostedJournalProfileRepository(client)  # type: ignore[arg-type]
 
     assert repository.publish("0031-9007", [guide, scope], [claim], [], 0)["version"] == 1
     assert repository.official_snapshots("profile") == [{"source_id": guide.source_id}]
+    assert repository.current_version("0031-9007") == 1
+    repository.delete_snapshots("profile")
+    assert ("journal_source_snapshots", "DELETE") in client.calls
     with pytest.raises(HTTPException, match="Degraded"):
         repository.publish("0031-9007", [guide], [claim], ["missing"], 1)
 
@@ -291,7 +313,7 @@ def test_analysis_artifact_storage_and_lookup() -> None:
 
 def test_hosted_delete_and_retention(monkeypatch: pytest.MonkeyPatch) -> None:
     object_key = f"{WORKSPACE}/project/document"
-    client = ScriptedClient([[project_row()], [{"object_key": object_key}], None, None, None])
+    client = ScriptedClient([[project_row()], [{"object_key": object_key}], [], None, None, None])
     store = HostedFoundationStore(client)  # type: ignore[arg-type]
     store.delete_project(PRINCIPAL, str(project_row()["id"]))
     assert client.deletions == [("manuscripts", [object_key])]
@@ -302,6 +324,47 @@ def test_hosted_delete_and_retention(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(retention_store, "delete_project", lambda principal, project_id: deleted.append(project_id))
     assert retention_store.purge_expired() == 1
     assert deleted == ["old"]
+
+
+def test_hosted_source_documents_are_hard_deleted() -> None:
+    object_key = f"{WORKSPACE}/project/source.pdf"
+    client = ScriptedClient([[project_row()], [{"object_key": object_key}], None, None])
+    store = HostedFoundationStore(client)  # type: ignore[arg-type]
+
+    assert store.delete_source_documents(PRINCIPAL, str(project_row()["id"])) == 1
+    assert client.deletions == [("manuscripts", [object_key])]
+    assert ("documents", "DELETE") in client.calls
+
+
+def test_hosted_project_delete_prunes_unreferenced_superseded_profile() -> None:
+    profile_id = str(run_row()["profile_version_id"])
+    client = ScriptedClient(
+        [
+            [project_row()],
+            [],
+            [{"id": run_row()["id"], "profile_version_id": profile_id}],
+            [],
+            [],
+            None,
+            None,
+            None,
+            None,
+            None,
+            [],
+            [],
+            None,
+            None,
+            None,
+            None,
+            None,
+        ]
+    )
+    store = HostedFoundationStore(client)  # type: ignore[arg-type]
+
+    store.delete_project(PRINCIPAL, str(project_row()["id"]))
+
+    profile_calls = [call for call in client.calls if call[0] == "journal_profile_versions"]
+    assert profile_calls == [("journal_profile_versions", "PATCH"), ("journal_profile_versions", "DELETE")]
 
 
 def test_hosted_job_guards_and_profile_conflict(monkeypatch: pytest.MonkeyPatch) -> None:

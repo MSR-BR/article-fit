@@ -18,6 +18,7 @@ class FakeHostedStore:
         }
         self.updates: list[dict[str, object]] = []
         self.deleted: list[int] = []
+        self.deleted_projects: list[str] = []
         self.messages: list[dict[str, Any]] = []
 
     def worker_job(self, job_id: str) -> dict[str, Any] | None:
@@ -41,6 +42,11 @@ class FakeHostedStore:
 
     def purge_expired(self) -> int:
         return 2
+
+    def delete_source_documents(self, principal: object, project_id: str) -> int:
+        del principal
+        self.deleted_projects.append(project_id)
+        return 4
 
 
 QUEUE_ROW = {
@@ -102,6 +108,7 @@ def test_worker_retries_then_terminally_fails(monkeypatch: pytest.MonkeyPatch) -
     terminal = FakeHostedStore(attempts=2)
     assert process_message(terminal, QUEUE_ROW) is False  # type: ignore[arg-type]
     assert terminal.deleted == [7]
+    assert terminal.deleted_projects == ["project-1"]
     assert terminal.updates[-1]["state"] == "failed"
 
 
@@ -114,6 +121,7 @@ def test_worker_discards_poison_and_terminal_messages() -> None:
     terminal = FakeHostedStore(state="cancelled")
     assert process_message(terminal, QUEUE_ROW) is True  # type: ignore[arg-type]
     assert terminal.deleted == [7]
+    assert terminal.deleted_projects == ["project-1"]
 
 
 def test_process_batch_and_cli(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:

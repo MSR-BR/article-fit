@@ -292,6 +292,62 @@ def _editorial_metrics(text: str) -> dict[str, float]:
     }
 
 
+def durable_profile_payload(
+    evidence: list[Evidence], claims: list[dict[str, object]]
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Remove private-document fingerprints while retaining aggregate support."""
+    private_ids = {item.source_id for item in evidence if item.access_status == "private-derived"}
+    safe_evidence: list[dict[str, object]] = [
+        {key: value for key, value in asdict(item).items() if key != "content"}
+        for item in evidence
+        if item.source_id not in private_ids
+    ]
+    if private_ids:
+        safe_evidence.append(
+            {
+                "source_id": "ephemeral-user-sample",
+                "source_type": "ephemeral-user-sample",
+                "access_status": "derived-only",
+                "sample_count": len(private_ids),
+            }
+        )
+    safe_claims = json.loads(json.dumps(claims))
+    for claim in safe_claims:
+        source_ids = claim.get("sourceIds", [])
+        if not isinstance(source_ids, list):
+            continue
+        used_private = any(source_id in private_ids for source_id in source_ids)
+        claim["sourceIds"] = [source_id for source_id in source_ids if source_id not in private_ids]
+        if used_private:
+            claim["sourceIds"].append("ephemeral-user-sample")
+            claim["ephemeralSampleCount"] = len(private_ids)
+    return safe_evidence, safe_claims
+
+
+def merge_profile_memory(
+    previous_evidence: list[dict[str, object]],
+    previous_claims: list[dict[str, object]],
+    current_evidence: list[dict[str, object]],
+    current_claims: list[dict[str, object]],
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Keep one current conclusion per stable key and cumulative public provenance."""
+    evidence_by_id = {str(item.get("source_id")): item for item in previous_evidence}
+    for item in current_evidence:
+        source_id = str(item.get("source_id"))
+        if source_id == "ephemeral-user-sample" and source_id in evidence_by_id:
+            old_value = evidence_by_id[source_id].get("sample_count", 0)
+            current_value = item.get("sample_count", 0)
+            old_count = old_value if isinstance(old_value, int) and not isinstance(old_value, bool) else 0
+            current_count = (
+                current_value if isinstance(current_value, int) and not isinstance(current_value, bool) else 0
+            )
+            item = {**item, "sample_count": old_count + current_count}
+        evidence_by_id[source_id] = item
+    claims_by_key = {str(item.get("key")): item for item in previous_claims}
+    claims_by_key.update({str(item.get("key")): item for item in current_claims})
+    return list(evidence_by_id.values()), list(claims_by_key.values())
+
+
 class JournalProfileRepository:
     """Immutable, optimistic-concurrency journal profile storage."""
 
@@ -332,7 +388,7 @@ class JournalProfileRepository:
         evidence_by_id = {item.source_id: item for item in evidence}
         for claim in claims:
             validate_claim(claim, evidence_by_id)
-        shared_evidence = [{key: value for key, value in asdict(item).items() if key != "content"} for item in evidence]
+        shared_evidence, durable_claims = durable_profile_payload(evidence, claims)
         with closing(sqlite3.connect(self.database_path)) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
             head = connection.execute(
@@ -341,9 +397,20 @@ class JournalProfileRepository:
             current = int(head[1]) if head else 0
             if current != expected_version:
                 raise HTTPException(status_code=409, detail="Journal profile was concurrently updated")
+            if head:
+                previous = connection.execute(
+                    "SELECT claims_json, evidence_json FROM journal_profile_versions WHERE id = ?", (head[0],)
+                ).fetchone()
+                if previous:
+                    shared_evidence, durable_claims = merge_profile_memory(
+                        json.loads(previous[1]),
+                        json.loads(previous[0]),
+                        shared_evidence,
+                        durable_claims,
+                    )
             version = current + 1
             version_id = hashlib.sha256(
-                json.dumps([journal_issn, version, shared_evidence, claims], sort_keys=True).encode()
+                json.dumps([journal_issn, version, shared_evidence, durable_claims], sort_keys=True).encode()
             ).hexdigest()[:32]
             connection.execute(
                 "INSERT INTO journal_profile_versions VALUES (?, ?, ?, 'published', ?, ?, ?, ?, ?)",
@@ -351,7 +418,7 @@ class JournalProfileRepository:
                     version_id,
                     journal_issn,
                     version,
-                    json.dumps(claims, sort_keys=True),
+                    json.dumps(durable_claims, sort_keys=True),
                     json.dumps(shared_evidence, sort_keys=True),
                     "[]",
                     datetime.now(UTC).isoformat(),
@@ -372,6 +439,17 @@ class JournalProfileRepository:
                 ],
             )
         return self.get(version_id)
+
+    def current_version(self, journal_issn: str) -> int:
+        with closing(sqlite3.connect(self.database_path)) as connection:
+            row = connection.execute(
+                "SELECT version FROM journal_profile_heads WHERE journal_issn = ?", (journal_issn,)
+            ).fetchone()
+        return int(row[0]) if row else 0
+
+    def delete_snapshots(self, version_id: str) -> None:
+        with closing(sqlite3.connect(self.database_path)) as connection, connection:
+            connection.execute("DELETE FROM journal_source_snapshots WHERE profile_version_id = ?", (version_id,))
 
     def official_snapshots(self, version_id: str) -> list[dict[str, str]]:
         self.get(version_id)

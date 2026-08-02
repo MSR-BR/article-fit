@@ -176,6 +176,12 @@ def authenticate(
         raise HTTPException(status_code=400, detail="Invalid workspace identifier") from error
 
     access_token = authorization.removeprefix("Bearer ").strip()
+    expected = os.getenv("JOURNAL_MATCHER_INVITE_TOKEN", "local-invite-token")
+    if os.getenv("JOURNAL_MATCHER_PUBLIC_MVP", "false").lower() == "true":
+        if access_token != expected:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal credential")
+        return Principal(user_id="public-mvp", workspace_id=normalized_workspace)
+
     if isinstance(store, HostedFoundationStore):
         user = store.client.verify_user(access_token)
         user_id = user.get("id")
@@ -189,7 +195,6 @@ def authenticate(
             raise HTTPException(status_code=403, detail="User is not a member of this workspace")
         return Principal(user_id=normalized_user_id, workspace_id=normalized_workspace)
 
-    expected = os.getenv("JOURNAL_MATCHER_INVITE_TOKEN", "local-invite-token")
     if access_token != expected:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid invitation")
     return Principal(user_id="invited-pilot-user", workspace_id=normalized_workspace)
@@ -200,7 +205,7 @@ PrincipalDependency = Annotated[Principal, Depends(authenticate)]
 app = FastAPI(
     title="Article Fit API",
     version=__version__,
-    description="Invitation-only project and secure ingestion foundation.",
+    description="Privacy-minimized project and secure ingestion foundation.",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -374,13 +379,16 @@ async def execute_project_workflow(
         str(resolved["issn"]),
         str(resolved["officialDomain"]),
     )
+    profiles = profile_repository(store)
+    profiles.migrate()
+    current_profile_version = profiles.current_version(str(resolved["issn"]))
     ingestion = store.start_job(principal, project_id, payload.idempotency_key)
     research = await research_journal(
         project_id,
         ResearchRequest(
             scopeUrl=str(resolved["scopeUrl"]),
             guideUrl=str(resolved["guideUrl"]),
-            expectedProfileVersion=0,
+            expectedProfileVersion=current_profile_version,
             scopeSnapshot=payload.scope_snapshot,
             guideSnapshot=payload.guide_snapshot,
             assistedCaptureConfirmed=assisted,
@@ -401,6 +409,8 @@ async def execute_project_workflow(
     analysis = await create_analysis(project_id, AnalysisRequest(profileVersionId=str(profile["id"])), principal, store)
     enriched = await create_ai_review(str(analysis["id"]), principal, store)
     artifact_result = await generate_artifacts(str(analysis["id"]), principal, store)
+    profiles.delete_snapshots(str(profile["id"]))
+    store.delete_source_documents(principal, project_id)
     return {
         "state": "succeeded",
         "stage": "artifacts-ready",

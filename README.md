@@ -38,7 +38,7 @@ npm run dev:worker
 - API health: `http://localhost:8000/health`
 - Worker check: `npm run health:worker`
 
-The local API test path defaults to bearer token `local-invite-token` and stores metadata plus private objects below `/tmp/journal-matcher`. The hosted path requires Supabase Auth, validates the user and workspace membership in both the Vercel proxy and Python API, and never exposes the service-role key to the browser. Configure the values documented in `.env.example` before running either mode. Replace the example provider email with a monitored operational address; Crossref, OpenAlex, and Unpaywall require identifiable, rate-limited use.
+The local API test path defaults to bearer token `local-invite-token` and uses temporary private objects below `/tmp/journal-matcher`. The hosted MVP has no end-user login: its Vercel proxy sends a server-only internal credential to the private Python API and never exposes the Supabase service-role key to the browser. Uploaded sources and extracted text are deleted at terminal processing; generated downloads and orphaned projects expire within 24 hours. Only derived, privacy-safe journal memory persists. Configure the values documented in `.env.example` before running either mode. Replace the example provider email with a monitored operational address; Crossref, OpenAlex, and Unpaywall require identifiable, rate-limited use.
 
 ## Quality commands
 

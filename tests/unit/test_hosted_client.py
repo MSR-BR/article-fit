@@ -214,6 +214,27 @@ def test_hosted_authentication_requires_named_workspace_member() -> None:
     assert membership_error.value.status_code == 403
 
 
+def test_public_mvp_uses_only_the_internal_server_credential(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("JOURNAL_MATCHER_PUBLIC_MVP", "true")
+    monkeypatch.setenv("JOURNAL_MATCHER_INVITE_TOKEN", "server-only-token")
+    store = HostedFoundationStore(AuthStubClient({}, False))  # type: ignore[arg-type]
+    principal = authenticate(
+        store,
+        "Bearer server-only-token",
+        "11111111-1111-4111-8111-111111111111",
+    )
+    assert principal == Principal("public-mvp", "11111111-1111-4111-8111-111111111111")
+    assert store.client.calls == []
+
+    with pytest.raises(HTTPException) as error:
+        authenticate(
+            store,
+            "Bearer browser-supplied-value",
+            "11111111-1111-4111-8111-111111111111",
+        )
+    assert error.value.status_code == 401
+
+
 def test_hosted_project_payload_is_workspace_scoped() -> None:
     client = StubClient(
         [

@@ -14,14 +14,20 @@ from urllib.request import Request, urlopen
 from fastapi import HTTPException
 
 from journal_matcher_api.foundation import (
-    RETENTION_DAYS,
+    EPHEMERAL_RETENTION_HOURS,
     DocumentSlot,
     Principal,
     new_id,
     utc_now,
     validate_and_extract,
 )
-from journal_matcher_api.journal_research import OFFICIAL_TYPES, Evidence, validate_claim
+from journal_matcher_api.journal_research import (
+    OFFICIAL_TYPES,
+    Evidence,
+    durable_profile_payload,
+    merge_profile_memory,
+    validate_claim,
+)
 from journal_matcher_api.manuscript_analysis import Decision, now_iso, stable_id
 
 
@@ -513,7 +519,9 @@ class HostedFoundationStore:
             payload={"state": "cancelled", "cancel_requested": True, "updated_at": utc_now()},
         )
         self.audit(principal, "job.cancelled", "job", job_id)
-        return self.get_job(principal, job_id)
+        cancelled = self.get_job(principal, job_id)
+        self.delete_source_documents(principal, str(job["projectId"]))
+        return cancelled
 
     def reference_texts(self, principal: Principal, project_id: str) -> list[str]:
         self._project_row(principal, project_id)
@@ -579,24 +587,130 @@ class HostedFoundationStore:
                 },
             )
         )
-        deleted_at = utc_now()
+        analysis_rows = require_rows(
+            self.client.table(
+                "analysis_runs",
+                query={
+                    "select": "id,profile_version_id",
+                    "project_id": f"eq.{project_id}",
+                    "workspace_id": f"eq.{principal.workspace_id}",
+                },
+            )
+        )
+        analysis_ids = [str(row["id"]) for row in analysis_rows]
+        profile_version_ids = {str(row["profile_version_id"]) for row in analysis_rows}
+        artifact_rows: list[dict[str, Any]] = []
+        recommendation_rows: list[dict[str, Any]] = []
+        if analysis_ids:
+            joined_ids = ",".join(analysis_ids)
+            artifact_rows = require_rows(
+                self.client.table(
+                    "analysis_artifacts",
+                    query={
+                        "select": "object_key",
+                        "analysis_id": f"in.({joined_ids})",
+                        "workspace_id": f"eq.{principal.workspace_id}",
+                    },
+                )
+            )
+            recommendation_rows = require_rows(
+                self.client.table(
+                    "recommendations",
+                    query={"select": "id", "analysis_id": f"in.({joined_ids})"},
+                )
+            )
+            self.client.delete_objects("manuscripts", [str(row["object_key"]) for row in document_rows])
+            if artifact_rows:
+                self.client.delete_objects("artifacts", [str(row["object_key"]) for row in artifact_rows])
+            recommendation_ids = [str(row["id"]) for row in recommendation_rows]
+            if recommendation_ids:
+                self.client.table(
+                    "recommendation_decisions",
+                    method="DELETE",
+                    query={
+                        "recommendation_id": f"in.({','.join(recommendation_ids)})",
+                        "workspace_id": f"eq.{principal.workspace_id}",
+                    },
+                )
+            for table in ("analysis_artifacts", "recommendations", "guide_rules"):
+                self.client.table(table, method="DELETE", query={"analysis_id": f"in.({joined_ids})"})
+            self.client.table(
+                "analysis_runs",
+                method="DELETE",
+                query={"id": f"in.({joined_ids})", "workspace_id": f"eq.{principal.workspace_id}"},
+            )
+            for profile_version_id in profile_version_ids:
+                self.client.table(
+                    "journal_source_snapshots",
+                    method="DELETE",
+                    query={"profile_version_id": f"eq.{profile_version_id}"},
+                )
+                head_rows = require_rows(
+                    self.client.table(
+                        "journal_profile_heads",
+                        query={"select": "version_id", "version_id": f"eq.{profile_version_id}", "limit": "1"},
+                    )
+                )
+                reference_rows = require_rows(
+                    self.client.table(
+                        "analysis_runs",
+                        query={"select": "id", "profile_version_id": f"eq.{profile_version_id}", "limit": "1"},
+                    )
+                )
+                if not head_rows and not reference_rows:
+                    self.client.table(
+                        "journal_profile_versions",
+                        method="PATCH",
+                        query={"supersedes_id": f"eq.{profile_version_id}"},
+                        payload={"supersedes_id": None},
+                    )
+                    self.client.table(
+                        "journal_profile_versions", method="DELETE", query={"id": f"eq.{profile_version_id}"}
+                    )
+        if not analysis_ids:
+            self.client.delete_objects("manuscripts", [str(row["object_key"]) for row in document_rows])
         self.client.table(
             "documents",
-            method="PATCH",
+            method="DELETE",
             query={"project_id": f"eq.{project_id}", "workspace_id": f"eq.{principal.workspace_id}"},
-            payload={"deleted_at": deleted_at},
         )
         self.client.table(
             "projects",
-            method="PATCH",
+            method="DELETE",
             query={"id": f"eq.{project_id}", "workspace_id": f"eq.{principal.workspace_id}"},
-            payload={"deleted_at": deleted_at},
         )
-        self.client.delete_objects("manuscripts", [str(row["object_key"]) for row in document_rows])
         self.audit(principal, "project.deleted", "project", project_id)
 
+    def delete_source_documents(self, principal: Principal, project_id: str) -> int:
+        """Remove submitted Storage objects and all extracted private document rows."""
+        self._project_row(principal, project_id)
+        rows = require_rows(
+            self.client.table(
+                "documents",
+                query={
+                    "select": "object_key",
+                    "project_id": f"eq.{project_id}",
+                    "workspace_id": f"eq.{principal.workspace_id}",
+                },
+            )
+        )
+        self.client.delete_objects("manuscripts", [str(row["object_key"]) for row in rows])
+        self.client.table(
+            "documents",
+            method="DELETE",
+            query={"project_id": f"eq.{project_id}", "workspace_id": f"eq.{principal.workspace_id}"},
+        )
+        self.audit(
+            principal,
+            "documents.ephemeral-deleted",
+            "project",
+            project_id,
+            {"count": str(len(rows))},
+        )
+        return len(rows)
+
     def purge_expired(self, workspace_id: str | None = None) -> int:
-        cutoff = (datetime.now(UTC) - timedelta(days=RETENTION_DAYS)).isoformat()
+        cutoff = (datetime.now(UTC) - timedelta(hours=EPHEMERAL_RETENTION_HOURS)).isoformat()
         query = {
             "select": "id,workspace_id,owner_id",
             "created_at": f"lt.{cutoff}",
@@ -654,24 +768,18 @@ class HostedJournalProfileRepository:
         current = int(heads[0]["version"]) if heads else 0
         if current != expected_version:
             raise HTTPException(status_code=409, detail="Journal profile was concurrently updated")
-        shared_evidence = [
-            {
-                "source_id": item.source_id,
-                "source_type": item.source_type,
-                "canonical_url": item.canonical_url,
-                "title": item.title,
-                "identifier": item.identifier,
-                "published_at": item.published_at,
-                "retrieved_at": item.retrieved_at,
-                "content_hash": item.content_hash,
-                "locator": item.locator,
-                "access_status": item.access_status,
-            }
-            for item in evidence
-        ]
+        shared_evidence, durable_claims = durable_profile_payload(evidence, claims)
+        if heads:
+            previous = self.get(str(heads[0]["version_id"]))
+            shared_evidence, durable_claims = merge_profile_memory(
+                cast(list[dict[str, object]], previous["evidence"]),
+                cast(list[dict[str, object]], previous["claims"]),
+                shared_evidence,
+                durable_claims,
+            )
         version = current + 1
         version_id = hashlib.sha256(
-            json.dumps([journal_issn, version, shared_evidence, claims], sort_keys=True).encode()
+            json.dumps([journal_issn, version, shared_evidence, durable_claims], sort_keys=True).encode()
         ).hexdigest()[:32]
         created_at = utc_now()
         self.client.table(
@@ -682,7 +790,7 @@ class HostedJournalProfileRepository:
                 "journal_issn": journal_issn,
                 "version": version,
                 "status": "published",
-                "claims_json": claims,
+                "claims_json": durable_claims,
                 "evidence_json": shared_evidence,
                 "limitations_json": [],
                 "created_at": created_at,
@@ -709,6 +817,22 @@ class HostedJournalProfileRepository:
         if snapshots:
             self.client.table("journal_source_snapshots", method="POST", payload=snapshots)
         return self.get(version_id)
+
+    def current_version(self, journal_issn: str) -> int:
+        rows = require_rows(
+            self.client.table(
+                "journal_profile_heads",
+                query={"select": "version", "journal_issn": f"eq.{journal_issn}", "limit": "1"},
+            )
+        )
+        return int(rows[0]["version"]) if rows else 0
+
+    def delete_snapshots(self, version_id: str) -> None:
+        self.client.table(
+            "journal_source_snapshots",
+            method="DELETE",
+            query={"profile_version_id": f"eq.{version_id}"},
+        )
 
     def official_snapshots(self, version_id: str) -> list[dict[str, str]]:
         self.get(version_id)
