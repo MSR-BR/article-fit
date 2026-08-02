@@ -8,7 +8,8 @@ const { getUser, signInWithOtp } = vi.hoisted(() => ({
 }));
 
 vi.mock('../lib/supabase/client', () => ({
-  createClient: () => ({ auth: { getUser, signInWithOtp } }),
+  createClient: () => ({ auth: { getUser } }),
+  createEmailLinkClient: () => ({ auth: { signInWithOtp } }),
 }));
 
 describe('SignIn', () => {

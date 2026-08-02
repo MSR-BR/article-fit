@@ -11,6 +11,7 @@ Replace the shared pilot bearer token with named, invitation-only Supabase Auth 
 - Authenticate pilot users individually with a one-time email link through the existing Supabase project `qbjhtdalhjcsmujntoni`.
 - Keep public sign-up disabled. Only users provisioned by an operator may request a sign-in link.
 - Complete Supabase email callbacks in the browser for PKCE codes, token hashes, or implicit session fragments and remove callback credentials from the visible URL after processing.
+- Initiate passwordless email links with the client-only implicit flow so the callback remains usable when an email application opens it outside the browser that requested it; continue persisting and validating the resulting named session through the existing cookie, proxy, and API boundaries.
 - Derive the active workspace from `workspace_members`; never trust a browser-supplied workspace identifier without checking membership.
 - Validate the Supabase access token and workspace membership again in the Python API, even when the request passed through Vercel.
 - Keep the Supabase secret/service-role key server-only. Browser code may receive only the project URL and publishable key.

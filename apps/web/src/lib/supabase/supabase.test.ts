@@ -1,14 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createBrowserClient, createServerClient, cookieStore } = vi.hoisted(
-  () => ({
-    createBrowserClient: vi.fn(),
-    createServerClient: vi.fn(),
-    cookieStore: { getAll: vi.fn(), set: vi.fn() },
-  }),
-);
+const {
+  createBrowserClient,
+  createServerClient,
+  createSupabaseClient,
+  cookieStore,
+} = vi.hoisted(() => ({
+  createBrowserClient: vi.fn(),
+  createServerClient: vi.fn(),
+  createSupabaseClient: vi.fn(),
+  cookieStore: { getAll: vi.fn(), set: vi.fn() },
+}));
 
 vi.mock('@supabase/ssr', () => ({ createBrowserClient, createServerClient }));
+vi.mock('@supabase/supabase-js', () => ({
+  createClient: createSupabaseClient,
+}));
 vi.mock('next/headers', () => ({
   cookies: vi.fn().mockResolvedValue(cookieStore),
 }));
@@ -18,10 +25,30 @@ describe('Supabase clients', () => {
     vi.resetModules();
     createBrowserClient.mockReset();
     createServerClient.mockReset();
+    createSupabaseClient.mockReset();
     cookieStore.getAll.mockReset();
     cookieStore.set.mockReset();
     vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://project.supabase.co');
     vi.stubEnv('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY', 'publishable-key');
+  });
+
+  it('requests email links with a cross-browser implicit flow', async () => {
+    const emailLinkClient = { auth: {} };
+    createSupabaseClient.mockReturnValue(emailLinkClient);
+    const { createEmailLinkClient } = await import('./client');
+    expect(createEmailLinkClient()).toBe(emailLinkClient);
+    expect(createSupabaseClient).toHaveBeenCalledWith(
+      'https://project.supabase.co',
+      'publishable-key',
+      {
+        auth: {
+          autoRefreshToken: false,
+          detectSessionInUrl: false,
+          flowType: 'implicit',
+          persistSession: false,
+        },
+      },
+    );
   });
 
   afterEach(() => vi.unstubAllEnvs());

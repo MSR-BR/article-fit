@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useState } from 'react';
-import { createClient } from '../lib/supabase/client';
+import { createClient, createEmailLinkClient } from '../lib/supabase/client';
 
 export function SignIn({
   initialMessage = '',
@@ -19,7 +19,7 @@ export function SignIn({
     event.preventDefault();
     setBusy(true);
     setMessage('');
-    const { error } = await createClient().auth.signInWithOtp({
+    const { error } = await createEmailLinkClient().auth.signInWithOtp({
       email: email.trim(),
       options: {
         shouldCreateUser: false,
@@ -34,9 +34,7 @@ export function SignIn({
       return;
     }
     setLinkSent(true);
-    setMessage(
-      'Link enviado. Verifique seu e-mail e abra o link neste navegador.',
-    );
+    setMessage('Link enviado. Verifique seu e-mail e abra o link para entrar.');
   }
 
   async function verifyAccess() {

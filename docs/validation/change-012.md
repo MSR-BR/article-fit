@@ -31,6 +31,8 @@ No successful technical execution is recorded as expert approval until the owner
 
 The first owner email delivered Supabase's hosted magic link rather than the numeric code anticipated by the original interface. The link returned to Article Fit, but the page did not complete the callback and therefore displayed the access gate again. The interface now explicitly requests a one-time link and completes the returned Supabase session automatically. This finding must be rechecked in production before beginning the owner-led artifact review.
 
+The first corrective deployment still initiated the link through `@supabase/ssr`, whose browser client forces PKCE. Supabase documents that a PKCE callback can only be exchanged in the same browser and device where it began because the locally stored verifier is required. Email applications may open the link in another browser context, reproducing the access gate without a server error. The link request now uses a non-persistent, client-only implicit-flow client; the returned tokens are accepted by the existing browser session client, removed from the URL, stored in cookies, and independently revalidated by the Vercel proxy and Python API.
+
 ## Deployment evidence
 
 - Commit: `c917151` on `agent/article-fit-pilot`, pushed to `origin`.
