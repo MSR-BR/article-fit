@@ -39,5 +39,5 @@ Keep the open MVP within free-tier-friendly usage while preserving the journal m
 - [x] Resource audit completed.
 - [x] Test data removed while journal memory was preserved.
 - [x] Polling backoff and audit retention implemented.
-- [ ] C27 API/worker/Vercel deployment completed.
-- [ ] Post-deploy smoke tests completed.
+- [x] C27 API/worker/Vercel deployment completed.
+- [x] Post-deploy smoke tests completed.

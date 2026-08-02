@@ -34,4 +34,9 @@ Date: 2026-08-02
 
 ## Deployment
 
-Pending C27 Cloud Run and Vercel deployment, followed by production smoke checks.
+C27 deployment and production smoke checks completed.
+
+- Cloud Build `0deb4ac0-b5e3-4839-a266-e0a53e11f350` succeeded with tag `c27-20260802-1`.
+- API revision `article-fit-api-00041-tiq` is at 100% traffic; tagged health returned `ok` and private access returned `401`.
+- Worker and retention jobs use `worker:c27-20260802-1`.
+- Vercel deployment `dpl_CkqR9wUCTdwKSDUBTurXVoCjHfEU` is ready at `https://article-fit.vercel.app`.
