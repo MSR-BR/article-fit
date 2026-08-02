@@ -4,7 +4,8 @@ Status: implementation and hosted validation in progress.
 
 ## Automated evidence
 
-- Named email-OTP UI and session gate: 22 web tests pass with 93.25% line coverage.
+- Named email-link UI and session gate: 27 web tests pass with 92.39% line coverage.
+- The callback regression is covered for PKCE `code`, `token_hash`, implicit access/refresh tokens, existing sessions, and expired callbacks. Callback credentials are removed from the browser URL after processing.
 - Vercel proxy user/workspace derivation: authenticated and unauthenticated route cases pass.
 - Python API token and membership verification: 102 Python tests pass with 90.07% total coverage.
 - Shared contracts: 6 tests pass with 100% coverage.
@@ -25,6 +26,10 @@ Status: implementation and hosted validation in progress.
 The owner-led session will use private runtime files supplied outside Git. The reviewer will assess the four generated artifacts against the frozen Change 005 rubric, including editorial fit, actionable form/content improvements, manuscript anchoring, scientific-invariant preservation, citation support, and document fidelity.
 
 No successful technical execution is recorded as expert approval until the owner completes that review. A colleague's later review remains a separate external validation round.
+
+## Corrective finding
+
+The first owner email delivered Supabase's hosted magic link rather than the numeric code anticipated by the original interface. The link returned to Article Fit, but the page did not complete the callback and therefore displayed the access gate again. The interface now explicitly requests a one-time link and completes the returned Supabase session automatically. This finding must be rechecked in production before beginning the owner-led artifact review.
 
 ## Deployment evidence
 

@@ -4,47 +4,49 @@ import { FormEvent, useState } from 'react';
 import { createClient } from '../lib/supabase/client';
 
 export function SignIn({
+  initialMessage = '',
   onSignedIn,
 }: {
+  initialMessage?: string;
   onSignedIn: (email: string) => void;
 }) {
   const [email, setEmail] = useState('');
-  const [code, setCode] = useState('');
-  const [codeSent, setCodeSent] = useState(false);
+  const [linkSent, setLinkSent] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState('');
+  const [message, setMessage] = useState(initialMessage);
 
-  async function requestCode(event: FormEvent<HTMLFormElement>) {
+  async function requestLink(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
     setMessage('');
     const { error } = await createClient().auth.signInWithOtp({
       email: email.trim(),
-      options: { shouldCreateUser: false },
+      options: {
+        shouldCreateUser: false,
+        emailRedirectTo: window.location.origin,
+      },
     });
     setBusy(false);
     if (error) {
       setMessage(
-        'Não foi possível enviar o código. Confirme se este e-mail foi convidado.',
+        'Não foi possível enviar o link. Confirme se este e-mail foi convidado.',
       );
       return;
     }
-    setCodeSent(true);
-    setMessage('Código enviado. Verifique seu e-mail.');
+    setLinkSent(true);
+    setMessage(
+      'Link enviado. Verifique seu e-mail e abra o link neste navegador.',
+    );
   }
 
-  async function verifyCode(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function verifyAccess() {
     setBusy(true);
-    setMessage('');
-    const { data, error } = await createClient().auth.verifyOtp({
-      email: email.trim(),
-      token: code.trim(),
-      type: 'email',
-    });
+    const { data, error } = await createClient().auth.getUser();
     setBusy(false);
     if (error || !data.user?.email) {
-      setMessage('Código inválido ou expirado. Solicite um novo código.');
+      setMessage(
+        'O acesso ainda não foi confirmado. Abra o link recebido ou solicite outro.',
+      );
       return;
     }
     onSignedIn(data.user.email);
@@ -62,11 +64,11 @@ export function SignIn({
         <p className="eyebrow">Piloto por convite</p>
         <h1 id="auth-title">Acesso ao Article Fit</h1>
         <p>
-          Use o e-mail autorizado. Enviaremos um código temporário, sem
-          necessidade de senha.
+          Use o e-mail autorizado. Enviaremos um link seguro, sem necessidade de
+          senha.
         </p>
-        {!codeSent ? (
-          <form onSubmit={requestCode}>
+        {!linkSent ? (
+          <form onSubmit={requestLink}>
             <label htmlFor="pilot-email">E-mail</label>
             <input
               id="pilot-email"
@@ -77,37 +79,25 @@ export function SignIn({
               required
             />
             <button type="submit" disabled={busy || !email.trim()}>
-              {busy ? 'Enviando…' : 'Receber código'}
+              {busy ? 'Enviando…' : 'Enviar link de acesso'}
             </button>
           </form>
         ) : (
-          <form onSubmit={verifyCode}>
-            <label htmlFor="pilot-code">Código recebido</label>
-            <input
-              id="pilot-code"
-              type="text"
-              inputMode="numeric"
-              value={code}
-              onChange={(event) => setCode(event.currentTarget.value)}
-              autoComplete="one-time-code"
-              minLength={6}
-              required
-            />
-            <button type="submit" disabled={busy || code.trim().length < 6}>
-              {busy ? 'Verificando…' : 'Entrar'}
+          <div className="auth-link-actions">
+            <button type="button" onClick={verifyAccess} disabled={busy}>
+              {busy ? 'Verificando…' : 'Já abri o link'}
             </button>
             <button
               type="button"
               className="text-button"
               onClick={() => {
-                setCodeSent(false);
-                setCode('');
+                setLinkSent(false);
                 setMessage('');
               }}
             >
               Usar outro e-mail
             </button>
-          </form>
+          </div>
         )}
         {message && (
           <p className="auth-message" role="status">

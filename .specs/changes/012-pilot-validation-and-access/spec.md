@@ -8,8 +8,9 @@ Replace the shared pilot bearer token with named, invitation-only Supabase Auth 
 
 ## Requirements
 
-- Authenticate pilot users individually with email OTP through the existing Supabase project `qbjhtdalhjcsmujntoni`.
-- Keep public sign-up disabled. Only users provisioned by an operator may request a sign-in code.
+- Authenticate pilot users individually with a one-time email link through the existing Supabase project `qbjhtdalhjcsmujntoni`.
+- Keep public sign-up disabled. Only users provisioned by an operator may request a sign-in link.
+- Complete Supabase email callbacks in the browser for PKCE codes, token hashes, or implicit session fragments and remove callback credentials from the visible URL after processing.
 - Derive the active workspace from `workspace_members`; never trust a browser-supplied workspace identifier without checking membership.
 - Validate the Supabase access token and workspace membership again in the Python API, even when the request passed through Vercel.
 - Keep the Supabase secret/service-role key server-only. Browser code may receive only the project URL and publishable key.
@@ -28,7 +29,7 @@ Replace the shared pilot bearer token with named, invitation-only Supabase Auth 
 ## Acceptance criteria
 
 - An unauthenticated visitor cannot access the upload page or proxy API calls.
-- A provisioned user can request and verify an email OTP, sign out, and regain access without public registration.
+- A provisioned user can request and open a one-time email link, sign out, and regain access without public registration.
 - The Vercel proxy forwards the authenticated user's token and a workspace that the user belongs to.
 - The Python API rejects invalid, expired, anonymous, or non-member credentials and prevents cross-workspace access.
 - The owner can complete one hosted workflow and download all four expected artifacts.
@@ -61,5 +62,6 @@ Replace the shared pilot bearer token with named, invitation-only Supabase Auth 
 - [x] Owner identity and workspace membership are provisioned; public and anonymous sign-up are disabled.
 - [x] Automated release gates pass locally; hosted smoke remains part of the deployment gate.
 - [x] Production commit, push, immutable deployments, authenticated smoke, and worker health check complete.
+- [x] Hosted email-link callback regression is covered for all supported Supabase callback formats.
 - [ ] Owner-led hosted pilot and artifact review complete.
 - [ ] Change 005/006 sign-off state and residual risks are updated.

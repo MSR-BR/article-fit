@@ -2,13 +2,33 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import HomePage from './page';
 
-const { getUser, signOut } = vi.hoisted(() => ({
+const {
+  exchangeCodeForSession,
+  getUser,
+  onAuthStateChange,
+  setSession,
+  signOut,
+  verifyOtp,
+} = vi.hoisted(() => ({
+  exchangeCodeForSession: vi.fn(),
   getUser: vi.fn(),
+  onAuthStateChange: vi.fn(),
+  setSession: vi.fn(),
   signOut: vi.fn(),
+  verifyOtp: vi.fn(),
 }));
 
 vi.mock('../lib/supabase/client', () => ({
-  createClient: () => ({ auth: { getUser, signOut } }),
+  createClient: () => ({
+    auth: {
+      exchangeCodeForSession,
+      getUser,
+      onAuthStateChange,
+      setSession,
+      signOut,
+      verifyOtp,
+    },
+  }),
 }));
 
 function jsonResponse(value: unknown, status = 200) {
@@ -46,7 +66,11 @@ function completePackage() {
 describe('HomePage', () => {
   beforeEach(() => {
     getUser.mockReset();
+    onAuthStateChange.mockReset();
     signOut.mockReset();
+    onAuthStateChange.mockReturnValue({
+      data: { subscription: { unsubscribe: vi.fn() } },
+    });
     getUser.mockResolvedValue({
       data: { user: { email: 'pilot@example.com' } },
     });

@@ -2,6 +2,7 @@
 
 import { ChangeEvent, useEffect, useMemo, useState } from 'react';
 import { createClient } from '../lib/supabase/client';
+import { completeEmailLogin } from '../lib/supabase/complete-email-login';
 import { SignIn } from './sign-in';
 
 type UploadState = {
@@ -57,6 +58,7 @@ export default function HomePage({
   const [authEmail, setAuthEmail] = useState<string | null | undefined>(
     initialUserEmail,
   );
+  const [authMessage, setAuthMessage] = useState('');
   const [uploads, setUploads] = useState<UploadState>({
     references: [],
     manuscript: null,
@@ -78,16 +80,36 @@ export default function HomePage({
   useEffect(() => {
     if (initialUserEmail !== undefined) return;
     let active = true;
-    createClient()
-      .auth.getUser()
-      .then(({ data }) => {
-        if (active) setAuthEmail(data.user?.email ?? null);
+    const client = createClient();
+    const listener = client.auth.onAuthStateChange((_event, session) => {
+      if (active && session?.user.email) {
+        setAuthEmail(session.user.email);
+        setAuthMessage('');
+      }
+    });
+    completeEmailLogin(client, window.location.href)
+      .then((result) => {
+        if (!active) return;
+        if (result.callbackFound) {
+          window.history.replaceState(
+            {},
+            document.title,
+            window.location.pathname,
+          );
+        }
+        setAuthEmail(result.email);
+        setAuthMessage(
+          result.error && result.callbackFound
+            ? 'O link não pôde ser confirmado. Solicite um novo link de acesso.'
+            : '',
+        );
       })
       .catch(() => {
         if (active) setAuthEmail(null);
       });
     return () => {
       active = false;
+      listener.data.subscription.unsubscribe();
     };
   }, [initialUserEmail]);
 
@@ -254,7 +276,7 @@ export default function HomePage({
   }
 
   if (authEmail === null) {
-    return <SignIn onSignedIn={setAuthEmail} />;
+    return <SignIn initialMessage={authMessage} onSignedIn={setAuthEmail} />;
   }
 
   return (

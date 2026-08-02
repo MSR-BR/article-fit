@@ -2,39 +2,46 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SignIn } from './sign-in';
 
-const { signInWithOtp, verifyOtp } = vi.hoisted(() => ({
+const { getUser, signInWithOtp } = vi.hoisted(() => ({
+  getUser: vi.fn(),
   signInWithOtp: vi.fn(),
-  verifyOtp: vi.fn(),
 }));
 
 vi.mock('../lib/supabase/client', () => ({
-  createClient: () => ({ auth: { signInWithOtp, verifyOtp } }),
+  createClient: () => ({ auth: { getUser, signInWithOtp } }),
 }));
 
 describe('SignIn', () => {
   beforeEach(() => {
     signInWithOtp.mockReset();
-    verifyOtp.mockReset();
+    getUser.mockReset();
   });
 
-  it('requests a code only for an already provisioned email', async () => {
+  it('requests a magic link only for an already provisioned email', async () => {
     signInWithOtp.mockResolvedValue({ error: null });
     render(<SignIn onSignedIn={vi.fn()} />);
     fireEvent.change(screen.getByLabelText('E-mail'), {
       target: { value: 'pilot@example.com' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Receber código' }));
-    await screen.findByText('Código enviado. Verifique seu e-mail.');
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Enviar link de acesso' }),
+    );
+    await screen.findByText(/Link enviado/);
     expect(signInWithOtp).toHaveBeenCalledWith({
       email: 'pilot@example.com',
-      options: { shouldCreateUser: false },
+      options: {
+        shouldCreateUser: false,
+        emailRedirectTo: window.location.origin,
+      },
     });
-    expect(screen.getByLabelText('Código recebido')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Já abri o link' }),
+    ).toBeInTheDocument();
   });
 
-  it('verifies the email code and returns the named identity', async () => {
+  it('recognizes the session after the user opens the link', async () => {
     signInWithOtp.mockResolvedValue({ error: null });
-    verifyOtp.mockResolvedValue({
+    getUser.mockResolvedValue({
       data: { user: { email: 'pilot@example.com' } },
       error: null,
     });
@@ -44,11 +51,9 @@ describe('SignIn', () => {
       target: { value: 'pilot@example.com' },
     });
     fireEvent.submit(screen.getByLabelText('E-mail').closest('form')!);
-    await screen.findByLabelText('Código recebido');
-    fireEvent.change(screen.getByLabelText('Código recebido'), {
-      target: { value: '123456' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Entrar' }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Já abri o link' }),
+    );
     await waitFor(() =>
       expect(onSignedIn).toHaveBeenCalledWith('pilot@example.com'),
     );
@@ -66,9 +71,9 @@ describe('SignIn', () => {
     );
   });
 
-  it('handles an expired code and allows changing the email', async () => {
+  it('handles an unconfirmed link and allows changing the email', async () => {
     signInWithOtp.mockResolvedValue({ error: null });
-    verifyOtp.mockResolvedValue({
+    getUser.mockResolvedValue({
       data: { user: null },
       error: new Error('expired'),
     });
@@ -77,13 +82,11 @@ describe('SignIn', () => {
       target: { value: 'pilot@example.com' },
     });
     fireEvent.submit(screen.getByLabelText('E-mail').closest('form')!);
-    await screen.findByLabelText('Código recebido');
-    fireEvent.change(screen.getByLabelText('Código recebido'), {
-      target: { value: '123456' },
-    });
-    fireEvent.submit(screen.getByLabelText('Código recebido').closest('form')!);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Já abri o link' }),
+    );
     expect(await screen.findByRole('status')).toHaveTextContent(
-      'Código inválido ou expirado',
+      'ainda não foi confirmado',
     );
     fireEvent.click(screen.getByRole('button', { name: 'Usar outro e-mail' }));
     expect(screen.getByLabelText('E-mail')).toBeInTheDocument();
