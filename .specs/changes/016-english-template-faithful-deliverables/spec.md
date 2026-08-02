@@ -73,4 +73,4 @@ Replace the MVP's Portuguese interface, rotating pseudo-live messages, plain-tex
 - [x] Pending suggestions included in both review copies.
 - [x] Automated gates pass.
 - [x] Rendered artifact QA passes.
-- [ ] Commit, push, deployment, and production verification complete.
+- [x] Commit, push, deployment, and production verification complete.
