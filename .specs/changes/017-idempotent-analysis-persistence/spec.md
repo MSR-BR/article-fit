@@ -52,4 +52,5 @@ Prevent repeated journal analyses from failing at the manuscript-comparison stag
 - [x] Post-research conflict copy corrected.
 - [x] Regression tests added.
 - [x] Automated gates pass.
-- [ ] Commit, push, deployment, and hosted verification complete.
+- [x] Commit, push, deployment, and hosted health/proxy verification complete.
+- [ ] Fresh end-to-end user workflow progresses past 62%.
