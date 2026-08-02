@@ -256,6 +256,39 @@ def test_profile_publish_and_snapshots() -> None:
         repository.publish("0031-9007", [guide], [claim], ["missing"], 1)
 
 
+def test_profile_finds_historical_official_snapshots() -> None:
+    client = ScriptedClient(
+        [
+            [{"id": "new", "version": 2}, {"id": "old", "version": 1}],
+            [],
+            [
+                {
+                    "source_id": "scope",
+                    "source_type": "official-scope",
+                    "content": "historical scope",
+                    "content_hash": "sha256:scope",
+                },
+                {
+                    "source_id": "guide",
+                    "source_type": "official-guide",
+                    "content": "historical guide",
+                    "content_hash": "sha256:guide",
+                },
+            ],
+        ]
+    )
+    repository = HostedJournalProfileRepository(client)  # type: ignore[arg-type]
+
+    snapshots = repository.latest_official_snapshots("0031-9007")
+
+    assert {item["source_type"] for item in snapshots} == {"official-scope", "official-guide"}
+    assert client.calls == [
+        ("journal_profile_versions", "GET"),
+        ("journal_source_snapshots", "GET"),
+        ("journal_source_snapshots", "GET"),
+    ]
+
+
 def test_analysis_create_get_review_and_decision() -> None:
     recommendation = {
         "id": "recommendation-1",

@@ -806,16 +806,31 @@ class HostedJournalProfileRepository:
             payload={"journal_issn": journal_issn, "version_id": version_id, "version": version},
             prefer="resolution=merge-duplicates",
         )
+        snapshot_by_type: dict[str, dict[str, object]] = {}
+        if heads and {item.source_type for item in evidence if item.source_type in OFFICIAL_TYPES} != OFFICIAL_TYPES:
+            for retained_snapshot in self.latest_official_snapshots(journal_issn):
+                snapshot_by_type[str(retained_snapshot["source_type"])] = {
+                    "profile_version_id": version_id,
+                    **retained_snapshot,
+                }
+        for evidence_item in evidence:
+            if evidence_item.source_type in OFFICIAL_TYPES:
+                snapshot_by_type[evidence_item.source_type] = {
+                    "profile_version_id": version_id,
+                    "source_id": evidence_item.source_id,
+                    "source_type": evidence_item.source_type,
+                    "content": evidence_item.content,
+                    "content_hash": evidence_item.content_hash,
+                }
         snapshots = [
             {
                 "profile_version_id": version_id,
-                "source_id": item.source_id,
-                "source_type": item.source_type,
-                "content": item.content,
-                "content_hash": item.content_hash,
+                "source_id": item["source_id"],
+                "source_type": item["source_type"],
+                "content": item["content"],
+                "content_hash": item["content_hash"],
             }
-            for item in evidence
-            if item.source_type in OFFICIAL_TYPES
+            for item in snapshot_by_type.values()
         ]
         if snapshots:
             self.client.table("journal_source_snapshots", method="POST", payload=snapshots)
@@ -859,6 +874,37 @@ class HostedJournalProfileRepository:
             )
         )
         return [{key: str(value) for key, value in row.items()} for row in rows]
+
+    def latest_official_snapshots(self, journal_issn: str) -> list[dict[str, str]]:
+        """Return the newest retained snapshot for each official source type."""
+        versions = require_rows(
+            self.client.table(
+                "journal_profile_versions",
+                query={
+                    "select": "id,version",
+                    "journal_issn": f"eq.{journal_issn}",
+                    "order": "version.desc",
+                },
+            )
+        )
+        newest: dict[str, dict[str, str]] = {}
+        for version in versions:
+            rows = require_rows(
+                self.client.table(
+                    "journal_source_snapshots",
+                    query={
+                        "select": "source_id,source_type,content,content_hash",
+                        "profile_version_id": f"eq.{version['id']}",
+                        "order": "source_type.asc",
+                    },
+                )
+            )
+            for row in rows:
+                item = {key: str(value) for key, value in row.items()}
+                newest.setdefault(item["source_type"], item)
+            if set(newest) == OFFICIAL_TYPES:
+                break
+        return [newest[source_type] for source_type in sorted(newest)]
 
     def get(self, version_id: str) -> dict[str, object]:
         rows = require_rows(

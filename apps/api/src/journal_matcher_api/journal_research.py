@@ -430,12 +430,28 @@ class JournalProfileRepository:
                    ON CONFLICT(journal_issn) DO UPDATE SET version_id=excluded.version_id, version=excluded.version""",
                 (journal_issn, version_id, version),
             )
+            snapshot_by_type: dict[str, tuple[str, str, str]] = {}
+            if head and {item.source_type for item in evidence if item.source_type in OFFICIAL_TYPES} != OFFICIAL_TYPES:
+                rows = connection.execute(
+                    """SELECT snapshots.source_id, snapshots.source_type, snapshots.content,
+                              snapshots.content_hash
+                       FROM journal_source_snapshots AS snapshots
+                       JOIN journal_profile_versions AS versions
+                         ON versions.id = snapshots.profile_version_id
+                       WHERE versions.journal_issn = ?
+                       ORDER BY versions.version DESC""",
+                    (journal_issn,),
+                ).fetchall()
+                for source_id, source_type, content, content_hash in rows:
+                    snapshot_by_type.setdefault(str(source_type), (str(source_id), str(content), str(content_hash)))
+            for item in evidence:
+                if item.source_type in OFFICIAL_TYPES:
+                    snapshot_by_type[item.source_type] = (item.source_id, item.content, item.content_hash)
             connection.executemany(
                 "INSERT INTO journal_source_snapshots VALUES (?, ?, ?, ?, ?)",
                 [
-                    (version_id, item.source_id, item.source_type, item.content, item.content_hash)
-                    for item in evidence
-                    if item.source_type in OFFICIAL_TYPES
+                    (version_id, source_id, source_type, content, content_hash)
+                    for source_type, (source_id, content, content_hash) in snapshot_by_type.items()
                 ],
             )
         return self.get(version_id)
@@ -468,6 +484,26 @@ class JournalProfileRepository:
                 (version_id,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def latest_official_snapshots(self, journal_issn: str) -> list[dict[str, str]]:
+        """Return the newest retained snapshot for each official source type."""
+        with closing(sqlite3.connect(self.database_path)) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                """SELECT snapshots.source_id, snapshots.source_type, snapshots.content,
+                          snapshots.content_hash
+                   FROM journal_source_snapshots AS snapshots
+                   JOIN journal_profile_versions AS versions
+                     ON versions.id = snapshots.profile_version_id
+                   WHERE versions.journal_issn = ?
+                   ORDER BY versions.version DESC""",
+                (journal_issn,),
+            ).fetchall()
+        newest: dict[str, dict[str, str]] = {}
+        for row in rows:
+            item = dict(row)
+            newest.setdefault(str(item["source_type"]), item)
+        return [newest[source_type] for source_type in sorted(newest)]
 
     def get(self, version_id: str) -> dict[str, object]:
         with closing(sqlite3.connect(self.database_path)) as connection:

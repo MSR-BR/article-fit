@@ -130,6 +130,22 @@ def test_profile_is_versioned_immutable_private_text_free_and_concurrency_safe(t
     assert len(repository.official_snapshots(str(second["id"]))) == 2
     repository.delete_snapshots(str(second["id"]))
     assert repository.official_snapshots(str(second["id"])) == []
+    historical = repository.latest_official_snapshots("1234-567X")
+    assert {item["source_type"] for item in historical} == {"official-scope", "official-guide"}
+
+    feedback = make_evidence("user-feedback", None, "Feedback", "use clearer figures", locator="artifact:report")
+    feedback_claim = {
+        "key": "feedback:figures",
+        "claimClass": "feedback-informed advisory",
+        "summary": "Use clearer figures",
+        "sourceIds": [feedback.source_id],
+        "locator": "artifact:report",
+    }
+    third = repository.publish("1234-567X", [feedback], [feedback_claim], [], expected_version=2)
+    assert {item["source_type"] for item in repository.official_snapshots(str(third["id"]))} == {
+        "official-scope",
+        "official-guide",
+    }
 
 
 def test_degraded_profile_cannot_be_published(tmp_path: Path) -> None:

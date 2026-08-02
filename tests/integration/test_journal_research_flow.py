@@ -273,3 +273,59 @@ def test_browser_assisted_official_snapshot_is_auditable_fallback(
     assert response.status_code == 200, response.text
     official_sources = [source for source in response.json()["sources"] if source["sourceType"].startswith("official")]
     assert {source["accessStatus"] for source in official_sources} == {"browser-assisted"}
+
+
+def test_blocked_official_pages_reuse_latest_historical_snapshots(
+    client: TestClient, store: FoundationStore, monkeypatch
+) -> None:
+    monkeypatch.setenv("JOURNAL_MATCHER_PROVIDER_EMAIL", "research@example.org")
+    monkeypatch.setattr(main, "PoliteHttpClient", FakeProvider)
+
+    first_project = prepare_project(client)
+    first = client.post(
+        f"/v1/projects/{first_project}/research",
+        headers=auth(),
+        json={
+            "scopeUrl": "https://example.org/scope",
+            "guideUrl": "https://example.org/guide",
+            "expectedProfileVersion": 0,
+        },
+    )
+    assert first.status_code == 200, first.text
+
+    second_project = prepare_project(client)
+    second = client.post(
+        f"/v1/projects/{second_project}/research",
+        headers=auth(),
+        json={
+            "scopeUrl": "https://example.org/scope",
+            "guideUrl": "https://example.org/guide",
+            "expectedProfileVersion": 1,
+        },
+    )
+    assert second.status_code == 200, second.text
+    repository = main.profile_repository(store)
+    repository.delete_snapshots(str(second.json()["profileVersion"]["id"]))
+
+    class BlockedOfficialProvider(FakeProvider):
+        def get(self, url: str, *, allowed_domain: str | None = None) -> bytes:
+            if allowed_domain:
+                raise main.HTTPException(status_code=502, detail="Provider returned HTTP 403")
+            return super().get(url, allowed_domain=allowed_domain)
+
+    monkeypatch.setattr(main, "PoliteHttpClient", BlockedOfficialProvider)
+    third_project = prepare_project(client)
+    response = client.post(
+        f"/v1/projects/{third_project}/research",
+        headers=auth(),
+        json={
+            "scopeUrl": "https://example.org/scope",
+            "guideUrl": "https://example.org/guide",
+            "expectedProfileVersion": 2,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    official_sources = [source for source in response.json()["sources"] if source["sourceType"].startswith("official")]
+    assert {source["accessStatus"] for source in official_sources} == {"cached-official"}
+    assert any("publisher blocked automated access" in warning for warning in response.json()["warnings"])

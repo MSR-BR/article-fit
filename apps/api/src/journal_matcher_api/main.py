@@ -633,7 +633,7 @@ async def _research_journal(
     repository = profile_repository(store)
     repository.migrate()
     previous = repository.current(str(journal["issn"]))
-    previous_snapshots = repository.official_snapshots(str(previous["id"])) if previous else []
+    previous_snapshots = repository.latest_official_snapshots(str(journal["issn"])) if previous else []
 
     def acquire_guidance(url: str, source_type: str, snapshot: str | None) -> tuple[str, str]:
         try:
@@ -643,7 +643,7 @@ async def _research_journal(
                 (item.get("content") for item in previous_snapshots if item.get("source_type") == source_type),
                 None,
             )
-            if isinstance(cached, str) and len(cached.strip()) >= 500:
+            if isinstance(cached, str) and len(cached.strip()) >= 100:
                 return cached, "cached-official"
             raise
 
@@ -667,6 +667,12 @@ async def _research_journal(
             access_status=guide_access,
         ),
     ]
+    guidance_warnings = []
+    if "cached-official" in {scope_access, guide_access}:
+        guidance_warnings.append(
+            "The publisher blocked automated access during this run; the latest validated official snapshots "
+            "from journal memory were reused. Verify time-sensitive submission requirements before submission."
+        )
     if progress_callback is not None:
         progress_callback("official-guidance", 40)
     now = datetime.now(UTC).date()
@@ -685,7 +691,7 @@ async def _research_journal(
         progress_callback("recent-articles", 50)
     hydrated: list[ArticleCandidate] = []
     limitations: list[str] = []
-    warnings: list[str] = []
+    warnings: list[str] = guidance_warnings
     for candidate in preselected:
         full_text, open_url = _acquire_open_text(client, candidate)
         hydrated.append(
