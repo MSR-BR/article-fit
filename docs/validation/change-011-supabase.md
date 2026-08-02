@@ -21,6 +21,8 @@ The ordered migrations `0002` through `0006` were applied through the authentica
 | Cloud Run API | Revision `article-fit-api-00001-psr`; health endpoint passed |
 | Cloud Run worker | Execution `article-fit-worker-2gb2f`; health-check passed without reading queue |
 | Vercel production | `dpl_DUPeDZd3jWp4XTv5185hBLJ3ziG6`; page 200 and authenticated proxy 404 passed |
+| Cloud Run rollback | Revision 2 → revision 1 → revision 2; health and proxy passed at each terminal state |
+| Retention by age | Scoped 31-day synthetic project and private object expired successfully |
 | `anon` grants on sampled private tables | 0 |
 | Supabase Security Advisor | 0 errors, 0 warnings, 0 suggestions |
 | Supabase Performance Advisor | 0 errors, 0 warnings, 17 informational suggestions |
@@ -32,7 +34,7 @@ private PDF upload/download, and `pgmq_public` send/delete. The test deleted onl
 created by that execution. A live incompatibility in bulk Storage deletion was corrected by using the documented
 single-object deletion endpoint for each explicitly scoped object key.
 
-## Remaining validation
+## Final status
 
-- Verify retention/deletion after the hosted API/worker deployment.
-- Exercise and document rollback after a second known-good Cloud Run revision exists.
+All Change 011 gates passed. The active API image and worker image use tag `c11-20260801-3`; final worker
+health-check execution `article-fit-worker-bqgzv` completed successfully without reading the workflow queue.

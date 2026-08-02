@@ -79,14 +79,20 @@ class SupabaseHttpClient:
         return self._request(
             f"/storage/v1/object/authenticated/{quote(bucket, safe='')}/{quote(object_key, safe='/')}",
             method="GET",
+            storage_missing_is_not_found=True,
         )
 
     def delete_objects(self, bucket: str, object_keys: list[str]) -> None:
         for object_key in object_keys:
-            self._request(
-                f"/storage/v1/object/{quote(bucket, safe='')}/{quote(object_key, safe='/')}",
-                method="DELETE",
-            )
+            try:
+                self._request(
+                    f"/storage/v1/object/{quote(bucket, safe='')}/{quote(object_key, safe='/')}",
+                    method="DELETE",
+                    storage_missing_is_not_found=True,
+                )
+            except HTTPException as error:
+                if error.status_code != 404:
+                    raise
 
     def _json_request(
         self,
@@ -123,6 +129,7 @@ class SupabaseHttpClient:
         body: bytes | None = None,
         content_type: str | None = None,
         extra_headers: dict[str, str] | None = None,
+        storage_missing_is_not_found: bool = False,
     ) -> bytes:
         suffix = f"?{urlencode(query)}" if query else ""
         headers = {"apikey": self._key, "Authorization": f"Bearer {self._key}", **(extra_headers or {})}
@@ -136,7 +143,7 @@ class SupabaseHttpClient:
             # Do not include response bodies: upstream errors can echo private data.
             if error.code in {401, 403}:
                 raise HTTPException(status_code=503, detail="Hosted persistence authorization failed") from None
-            if error.code == 404:
+            if error.code == 404 or (storage_missing_is_not_found and error.code == 400):
                 raise HTTPException(status_code=404, detail="Hosted resource not found") from None
             if error.code == 409:
                 raise HTTPException(status_code=409, detail="Hosted persistence conflict") from None
@@ -545,17 +552,17 @@ class HostedFoundationStore:
         self.client.delete_objects("manuscripts", [str(row["object_key"]) for row in document_rows])
         self.audit(principal, "project.deleted", "project", project_id)
 
-    def purge_expired(self) -> int:
+    def purge_expired(self, workspace_id: str | None = None) -> int:
         cutoff = (datetime.now(UTC) - timedelta(days=RETENTION_DAYS)).isoformat()
+        query = {
+            "select": "id,workspace_id,owner_id",
+            "created_at": f"lt.{cutoff}",
+            "deleted_at": "is.null",
+        }
+        if workspace_id is not None:
+            query["workspace_id"] = f"eq.{workspace_id}"
         rows = require_rows(
-            self.client.table(
-                "projects",
-                query={
-                    "select": "id,workspace_id,owner_id",
-                    "created_at": f"lt.{cutoff}",
-                    "deleted_at": "is.null",
-                },
-            )
+            self.client.table("projects", query=query)
         )
         for row in rows:
             self.delete_project(Principal(str(row["owner_id"]), str(row["workspace_id"])), str(row["id"]))

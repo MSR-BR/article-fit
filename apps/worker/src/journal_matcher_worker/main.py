@@ -110,8 +110,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.purge_expired:
-        data_root = Path(os.getenv("JOURNAL_MATCHER_DATA_ROOT", "/tmp/journal-matcher"))
-        count = FoundationStore(data_root / "metadata.sqlite3", data_root / "objects").purge_expired()
+        if os.getenv("JOURNAL_MATCHER_PERSISTENCE", "local") == "supabase":
+            count = hosted_store().purge_expired()
+        else:
+            data_root = Path(os.getenv("JOURNAL_MATCHER_DATA_ROOT", "/tmp/journal-matcher"))
+            count = FoundationStore(data_root / "metadata.sqlite3", data_root / "objects").purge_expired()
         print(json.dumps({"purgedProjects": count}, sort_keys=True))
         return 0
 

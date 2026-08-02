@@ -104,6 +104,19 @@ def test_private_object_deletion_uses_storage_object_endpoint(monkeypatch: pytes
     ]
 
 
+def test_storage_missing_object_is_normalized_and_delete_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
+    def missing_urlopen(request: object, timeout: float) -> FakeResponse:
+        del timeout
+        raise HTTPError(request.full_url, 400, "not found", {}, None)  # type: ignore[attr-defined]
+
+    monkeypatch.setattr("journal_matcher_api.hosted.urlopen", missing_urlopen)
+    client = SupabaseHttpClient(SupabaseSettings("https://project.supabase.co", "server-secret"))
+    with pytest.raises(HTTPException) as caught:
+        client.download("manuscripts", "workspace/missing.pdf")
+    assert caught.value.status_code == 404
+    client.delete_objects("manuscripts", ["workspace/missing.pdf"])
+
+
 def test_require_rows_rejects_invalid_shape() -> None:
     with pytest.raises(HTTPException, match="invalid row set"):
         require_rows({"id": "not-a-list"})

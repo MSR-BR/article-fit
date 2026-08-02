@@ -1,6 +1,6 @@
 # Change 011 — Hosted Persistence and Durable Processing
 
-Status: `in progress`
+Status: `complete`
 
 ## Objective
 
@@ -44,7 +44,9 @@ Replace the pilot's ephemeral SQLite/filesystem boundary with one secured Supaba
 - [x] Durable API/worker deployment implemented and verified.
 - [x] Node.js 24 migration validated locally and on Vercel (`dpl_4dBcxAdMV6r9rhBo1YxtEgea62wV`).
 - [x] Synthetic hosted end-to-end run passes.
-- [ ] Rollback, retention, and deletion drills pass.
+- [x] Rollback drill passes.
+- [x] Hosted deletion drill passes.
+- [x] Retention-by-age drill passes.
 
 ## Implementation notes
 
@@ -64,3 +66,7 @@ Replace the pilot's ephemeral SQLite/filesystem boundary with one secured Supaba
 - Cloud Run revision `article-fit-api-00001-psr` is healthy, the worker health execution
   `article-fit-worker-2gb2f` passed, and Vercel production deployment
   `dpl_DUPeDZd3jWp4XTv5185hBLJ3ziG6` proxies authenticated requests to the API.
+- Rollback moved 100% traffic from `article-fit-api-00002-jnl` to `article-fit-api-00001-psr`, passed
+  direct health and Vercel proxy checks, then restored revision 2 to 100%.
+- The workspace-scoped live retention drill expired one 31-day-old synthetic project, soft-deleted its metadata,
+  removed its private object, and cleaned only its UUID-scoped fixtures.

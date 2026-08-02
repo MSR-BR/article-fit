@@ -39,6 +39,9 @@ class FakeHostedStore:
         messages, self.messages = self.messages, []
         return messages
 
+    def purge_expired(self) -> int:
+        return 2
+
 
 QUEUE_ROW = {
     "msg_id": 7,
@@ -123,3 +126,10 @@ def test_process_batch_and_cli(monkeypatch: pytest.MonkeyPatch, capsys: pytest.C
     assert process_batch(1) == 0
     assert json.loads(capsys.readouterr().out) == {"failures": 0, "processed": 1}
     assert main(["--process-batch", "--batch-size", "1"]) == 0
+
+
+def test_hosted_retention_cli(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setenv("JOURNAL_MATCHER_PERSISTENCE", "supabase")
+    monkeypatch.setattr("journal_matcher_worker.main.hosted_store", FakeHostedStore)
+    assert main(["--purge-expired"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"purgedProjects": 2}
