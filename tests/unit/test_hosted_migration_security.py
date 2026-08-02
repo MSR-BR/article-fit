@@ -52,3 +52,5 @@ def test_queue_rpc_is_service_role_only() -> None:
     assert "pgmq_public.send(text,jsonb,integer)" in sql
     assert "revoke execute on function pgmq_public.read(text, integer, integer) from public, anon, authenticated" in sql
     assert "grant execute on function pgmq_public.delete(text, bigint) to service_role" in sql
+    assert "alter table journal_source_snapshots enable row level security" in sql
+    assert "revoke all on journal_source_snapshots from anon, authenticated" in sql

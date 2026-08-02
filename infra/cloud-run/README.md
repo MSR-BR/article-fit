@@ -24,3 +24,11 @@ server environment variables. The service-role key must never use a `NEXT_PUBLIC
 
 Do not apply these manifests until migration `0006`, hosted repository parity, queue recovery, tenant
 isolation, artifact download, deletion, and synthetic end-to-end tests pass.
+
+## Verified pilot deployment
+
+- API: `https://article-fit-api-468465260392.us-east1.run.app`, revision `article-fit-api-00001-psr`.
+- Worker: Cloud Run Job `article-fit-worker`, image tag `c11-20260801-2`.
+- Frontend: `https://article-fit.vercel.app`, production deployment `dpl_DUPeDZd3jWp4XTv5185hBLJ3ziG6`.
+- API service scaling: minimum zero (default), maximum one, concurrency four, timeout 300 seconds.
+- Worker health-check execution: `article-fit-worker-2gb2f`.

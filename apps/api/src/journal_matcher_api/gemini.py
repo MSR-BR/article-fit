@@ -245,6 +245,14 @@ class GeminiEditorialClient:
             editorial = EditorialResponse.model_validate_json(text)
         except GeminiProviderError:
             raise
-        except (KeyError, IndexError, TypeError, ValidationError, json.JSONDecodeError):
+        except ValidationError as error:
+            diagnostics = ", ".join(
+                f"{'.'.join(str(part) for part in item['loc'])}:{item['type']}"
+                for item in error.errors(include_input=False)
+            )
+            raise GeminiProviderError(
+                f"Gemini returned invalid structured editorial output ({diagnostics[:500]})"
+            ) from None
+        except (KeyError, IndexError, TypeError, json.JSONDecodeError):
             raise GeminiProviderError("Gemini returned invalid structured editorial output") from None
         return GeminiResult(model=self.model, response=editorial)

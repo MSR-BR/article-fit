@@ -40,16 +40,27 @@ Replace the pilot's ephemeral SQLite/filesystem boundary with one secured Supaba
 
 - [x] Existing Supabase project connected to all three Vercel environments.
 - [x] Hosted schema, RLS, buckets, and queue implemented and verified.
-- [ ] Hosted Postgres/Storage adapter implemented and verified.
-- [ ] Durable API/worker deployment implemented and verified.
+- [x] Hosted Postgres/Storage adapter implemented and verified.
+- [x] Durable API/worker deployment implemented and verified.
 - [x] Node.js 24 migration validated locally and on Vercel (`dpl_4dBcxAdMV6r9rhBo1YxtEgea62wV`).
-- [ ] Synthetic hosted end-to-end run passes.
+- [x] Synthetic hosted end-to-end run passes.
 - [ ] Rollback, retention, and deletion drills pass.
 
 ## Implementation notes
 
 - Google Cloud project `article-fit-uff` is provisioned with institutional billing; deployment remains gated.
 - The server-only Supabase HTTP boundary and official `pgmq_public` queue contract are implemented and unit-tested.
+- Hosted project, document, profile, analysis, recommendation, decision, and artifact repositories now have
+  local parity tests. The forward migration was rehearsed successfully against project
+  `qbjhtdalhjcsmujntoni`: `journal_source_snapshots` exists with RLS enabled, `service_role` can call
+  `pgmq_public.send`, and `authenticated` cannot call it.
+- A service-role smoke test created and read isolated synthetic Postgres rows, uploaded and downloaded a private
+  PDF object, sent and deleted its own queue message, and removed its own database and Storage fixtures.
+- Two temporary authenticated users proved cross-workspace RLS isolation. A durable worker smoke test proved
+  claim, three bounded attempts, terminal failure, and acknowledgement. A wholly synthetic hosted workflow
+  completed the Gemini review and produced four private artifacts before deleting its scoped fixtures.
 - Cloud Run API/Job manifests enforce zero minimum API instances, one maximum API instance, bounded worker
   executions, separate service identities, and runtime-only secrets.
-- Hosted repository parity is still incomplete; no API/worker image may be deployed as production-ready yet.
+- Cloud Run revision `article-fit-api-00001-psr` is healthy, the worker health execution
+  `article-fit-worker-2gb2f` passed, and Vercel production deployment
+  `dpl_DUPeDZd3jWp4XTv5185hBLJ3ziG6` proxies authenticated requests to the API.

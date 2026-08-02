@@ -5,7 +5,14 @@ from urllib.error import HTTPError
 
 import pytest
 from fastapi import HTTPException
-from journal_matcher_api.hosted import SupabaseHttpClient, SupabaseSettings, require_rows
+from journal_matcher_api.foundation import Principal
+from journal_matcher_api.hosted import (
+    HostedFoundationStore,
+    HostedJournalProfileRepository,
+    SupabaseHttpClient,
+    SupabaseSettings,
+    require_rows,
+)
 
 
 class FakeResponse:
@@ -79,6 +86,85 @@ def test_queue_rpc_selects_the_managed_schema(monkeypatch: pytest.MonkeyPatch) -
     assert captured["Content-profile"] == "pgmq_public"
 
 
+def test_private_object_deletion_uses_storage_object_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[tuple[str, str]] = []
+
+    def fake_urlopen(request: object, timeout: float) -> FakeResponse:
+        del timeout
+        captured.append((request.get_method(), request.full_url))  # type: ignore[attr-defined]
+        return FakeResponse(b"")
+
+    monkeypatch.setattr("journal_matcher_api.hosted.urlopen", fake_urlopen)
+    client = SupabaseHttpClient(SupabaseSettings("https://project.supabase.co", "server-secret"))
+    client.delete_objects("manuscripts", ["workspace/project/one.pdf", "workspace/project/two.pdf"])
+
+    assert captured == [
+        ("DELETE", "https://project.supabase.co/storage/v1/object/manuscripts/workspace/project/one.pdf"),
+        ("DELETE", "https://project.supabase.co/storage/v1/object/manuscripts/workspace/project/two.pdf"),
+    ]
+
+
 def test_require_rows_rejects_invalid_shape() -> None:
     with pytest.raises(HTTPException, match="invalid row set"):
         require_rows({"id": "not-a-list"})
+
+
+class StubClient:
+    def __init__(self, responses: list[object]) -> None:
+        self.responses = responses
+        self.calls: list[tuple[str, str]] = []
+
+    def table(self, name: str, *, method: str = "GET", **kwargs: object) -> object:
+        del kwargs
+        self.calls.append((name, method))
+        return self.responses.pop(0)
+
+
+def test_hosted_project_payload_is_workspace_scoped() -> None:
+    client = StubClient(
+        [
+            [
+                {
+                    "id": "project-1",
+                    "journal_candidate": "Physical Review Letters",
+                    "journal_title": None,
+                    "journal_issn": None,
+                    "journal_domain": None,
+                    "journal_confirmed_at": None,
+                    "created_at": "2026-08-01T00:00:00+00:00",
+                }
+            ],
+            [],
+        ]
+    )
+    store = HostedFoundationStore(client)  # type: ignore[arg-type]
+    result = store.get_project(Principal("user-1", "11111111-1111-4111-8111-111111111111"), "project-1")
+
+    assert result["journalCandidate"] == "Physical Review Letters"
+    assert result["readyForResearch"] is False
+    assert client.calls == [("projects", "GET"), ("documents", "GET")]
+
+
+def test_hosted_profile_get_preserves_json_values() -> None:
+    client = StubClient(
+        [
+            [
+                {
+                    "id": "profile-1",
+                    "journal_issn": "0031-9007",
+                    "version": 1,
+                    "status": "published",
+                    "claims_json": [{"key": "scope"}],
+                    "evidence_json": [{"source_id": "official"}],
+                    "limitations_json": [],
+                    "created_at": "2026-08-01T00:00:00+00:00",
+                    "supersedes_id": None,
+                }
+            ]
+        ]
+    )
+    repository = HostedJournalProfileRepository(client)  # type: ignore[arg-type]
+    profile = repository.get("profile-1")
+
+    assert profile["journalIssn"] == "0031-9007"
+    assert profile["claims"] == [{"key": "scope"}]

@@ -15,4 +15,4 @@ RUN pip install --no-cache-dir --require-hashes -r requirements.lock && \
     rm -f /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.13 && \
     useradd --create-home --uid 10001 appuser
 USER appuser
-CMD ["python", "-m", "journal_matcher_worker.main"]
+ENTRYPOINT ["python", "-m", "journal_matcher_worker.main"]

@@ -121,7 +121,14 @@ export default function HomePage() {
         });
       }
       setActiveStep(2);
-      const workflow = await api<{ analysisId: string; artifacts: Array<{ kind: string }> }>(
+      const initiated = await api<{
+        analysisId?: string;
+        artifacts?: Array<{ kind: string }>;
+        id?: string;
+        state?: string;
+        progress?: number;
+        errorCode?: string | null;
+      }>(
         `/projects/${project.id}/run`,
         {
           method: 'POST',
@@ -132,6 +139,26 @@ export default function HomePage() {
           }),
         },
       );
+      let workflow = initiated;
+      if (!workflow.analysisId && workflow.id) {
+        for (let attempt = 0; attempt < 300; attempt += 1) {
+          const job = await api<{ state: string; progress: number; errorCode?: string | null }>(`/jobs/${workflow.id}`);
+          setActiveStep(job.progress >= 100 ? 3 : 2);
+          if (job.state === 'failed' || job.state === 'cancelled') {
+            throw new Error(job.errorCode ? `A análise falhou (${job.errorCode}).` : 'A análise não foi concluída.');
+          }
+          if (job.state === 'succeeded') {
+            workflow = await api<{ analysisId: string; artifacts: Array<{ kind: string }> }>(
+              `/projects/${project.id}/latest-analysis`,
+            );
+            break;
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, 2000));
+        }
+      }
+      if (!workflow.analysisId || !workflow.artifacts) {
+        throw new Error('A análise excedeu o tempo de acompanhamento. Tente novamente mais tarde.');
+      }
       setAnalysisId(workflow.analysisId);
       setArtifacts(workflow.artifacts.map((item) => item.kind));
       setActiveStep(3);

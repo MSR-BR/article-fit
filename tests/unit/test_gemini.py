@@ -91,6 +91,16 @@ def test_normalizes_provider_error_without_leaks(monkeypatch: pytest.MonkeyPatch
     assert "Private manuscript" not in str(error.value)
 
 
+def test_rejects_malformed_provider_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
+    class MalformedResponse(FakeResponse):
+        def __init__(self) -> None:
+            self.stream = BytesIO(json.dumps({"candidates": []}).encode())
+
+    monkeypatch.setattr("journal_matcher_api.gemini.urlopen", lambda *_args, **_kwargs: MalformedResponse())
+    with pytest.raises(GeminiProviderError, match="invalid structured"):
+        GeminiEditorialClient(api_key="secret").generate("Prompt")
+
+
 def test_builds_bounded_untrusted_evidence_package() -> None:
     prompt, source_ids = build_editorial_prompt(
         journal_title="Physical Review Letters",

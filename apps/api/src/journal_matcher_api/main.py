@@ -11,10 +11,13 @@ from difflib import SequenceMatcher
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal, cast
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from journal_matcher_api import __version__
@@ -25,6 +28,13 @@ from journal_matcher_api.gemini import (
     GeminiProviderError,
     build_editorial_prompt,
     proposals_as_recommendations,
+)
+from journal_matcher_api.hosted import (
+    HostedAnalysisRepository,
+    HostedFoundationStore,
+    HostedJournalProfileRepository,
+    SupabaseHttpClient,
+    SupabaseSettings,
 )
 from journal_matcher_api.journal_research import (
     ArticleCandidate,
@@ -119,10 +129,33 @@ class WorkflowRequest(BaseModel):
         return all(values)
 
 
+Store = FoundationStore | HostedFoundationStore
+ProfileRepository = JournalProfileRepository | HostedJournalProfileRepository
+AnalysisStore = AnalysisRepository | HostedAnalysisRepository
+
+
 @lru_cache
-def get_store() -> FoundationStore:
+def get_store() -> Store:
+    if os.getenv("JOURNAL_MATCHER_PERSISTENCE", "local") == "supabase":
+        url = os.getenv("SUPABASE_URL")
+        key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        if not url or not key:
+            raise RuntimeError("Hosted persistence requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY")
+        return HostedFoundationStore(SupabaseHttpClient(SupabaseSettings(url, key)))
     data_root = Path(os.getenv("JOURNAL_MATCHER_DATA_ROOT", "/tmp/journal-matcher"))
     return FoundationStore(data_root / "metadata.sqlite3", data_root / "objects")
+
+
+def profile_repository(store: Store) -> ProfileRepository:
+    if isinstance(store, HostedFoundationStore):
+        return HostedJournalProfileRepository(store.client)
+    return JournalProfileRepository(str(store.database_path))
+
+
+def analysis_repository(store: Store) -> AnalysisStore:
+    if isinstance(store, HostedFoundationStore):
+        return HostedAnalysisRepository(store.client)
+    return AnalysisRepository(store.database_path)
 
 
 def authenticate(
@@ -140,7 +173,7 @@ def authenticate(
 
 
 PrincipalDependency = Annotated[Principal, Depends(authenticate)]
-StoreDependency = Annotated[FoundationStore, Depends(get_store)]
+StoreDependency = Annotated[Store, Depends(get_store)]
 
 app = FastAPI(
     title="Article Fit API",
@@ -235,14 +268,40 @@ async def start_ingestion_job(
     return store.start_job(principal, project_id, payload.idempotency_key)
 
 
-@app.post("/v1/projects/{project_id}/run", tags=["workflow"])
+@app.post("/v1/projects/{project_id}/run", tags=["workflow"], response_model=None)
 async def run_project_workflow(
     project_id: str,
     payload: WorkflowRequest,
     principal: PrincipalDependency,
     store: StoreDependency,
-) -> dict[str, object]:
+) -> dict[str, object] | JSONResponse:
     """Run the bounded MVP workflow from verified journal identity through artifacts."""
+    project = store.get_project(principal, project_id)
+    if {str(item.get("slot")) for item in cast(list[dict[str, object]], project["documents"])} != {
+        "manuscript",
+        "reference-1",
+        "reference-2",
+        "reference-3",
+    }:
+        raise HTTPException(status_code=409, detail="The complete upload package is required")
+    if isinstance(store, HostedFoundationStore):
+        job = store.start_job(
+            principal,
+            project_id,
+            payload.idempotency_key,
+            {"workflow": payload.model_dump(by_alias=True, exclude_none=True)},
+        )
+        _trigger_cloud_run_worker()
+        return JSONResponse(status_code=202, content=job)
+    return await execute_project_workflow(project_id, payload, principal, store)
+
+
+async def execute_project_workflow(
+    project_id: str,
+    payload: WorkflowRequest,
+    principal: Principal,
+    store: Store,
+) -> dict[str, object]:
     project = store.get_project(principal, project_id)
     if {str(item.get("slot")) for item in cast(list[dict[str, object]], project["documents"])} != {
         "manuscript",
@@ -330,6 +389,35 @@ async def run_project_workflow(
         "recommendationCount": len(cast(list[object], enriched["recommendations"])),
         "artifacts": artifact_result["artifacts"],
     }
+
+
+def _trigger_cloud_run_worker() -> None:
+    run_url = os.getenv("CLOUD_RUN_WORKER_RUN_URL")
+    if not run_url:
+        return
+    expected_prefix = "https://run.googleapis.com/v2/projects/"
+    if not run_url.startswith(expected_prefix) or not run_url.endswith(":run"):
+        raise HTTPException(status_code=503, detail="Worker trigger is misconfigured")
+    token_request = Request(
+        "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
+        headers={"Metadata-Flavor": "Google"},
+    )
+    try:
+        with urlopen(token_request, timeout=5) as response:  # noqa: S310 - fixed metadata service URL
+            token_payload = json.loads(response.read())
+        access_token = token_payload.get("access_token") if isinstance(token_payload, dict) else None
+        if not isinstance(access_token, str) or not access_token:
+            raise ValueError("missing access token")
+        run_request = Request(
+            run_url,
+            data=b"{}",
+            headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(run_request, timeout=10):  # noqa: S310 - validated Google Cloud Run API URL
+            return
+    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as error:
+        raise HTTPException(status_code=503, detail="Worker could not be started") from error
 
 
 @app.get("/v1/jobs/{job_id}", tags=["jobs"])
@@ -477,7 +565,7 @@ async def research_journal(
         "profileVersion": None,
     }
     if not limitations:
-        repository = JournalProfileRepository(str(store.database_path))
+        repository = profile_repository(store)
         repository.migrate()
         result["profileVersion"] = repository.publish(
             str(journal["issn"]), evidence, claims, limitations, payload.expected_profile_version
@@ -583,7 +671,7 @@ async def get_journal_profile_version(
     version_id: str, principal: PrincipalDependency, store: StoreDependency
 ) -> dict[str, object]:
     del principal  # Authentication is required; profiles contain shared, non-private derived knowledge.
-    repository = JournalProfileRepository(str(store.database_path))
+    repository = profile_repository(store)
     repository.migrate()
     return repository.get(version_id)
 
@@ -634,7 +722,7 @@ async def create_analysis(
     journal = project.get("journal")
     if not project["readyForResearch"] or not isinstance(journal, dict):
         raise HTTPException(status_code=409, detail="A complete project is required")
-    profiles = JournalProfileRepository(str(store.database_path))
+    profiles = profile_repository(store)
     profiles.migrate()
     profile = profiles.get(payload.profile_version_id)
     if profile["journalIssn"] != journal["issn"] or profile["status"] != "published" or profile["limitations"]:
@@ -652,7 +740,7 @@ async def create_analysis(
     segments = cast(list[dict[str, str]], manuscript.get("segments", []))
     recommendations = build_recommendations(manuscript_text, profile, rules, anchor, segments)
     limitations = ["Heuristic qualitative review is enabled; expert scientific validation remains required."]
-    repository = AnalysisRepository(store.database_path)
+    repository = analysis_repository(store)
     repository.migrate()
     result = repository.create(
         principal,
@@ -670,21 +758,31 @@ async def create_analysis(
 
 @app.get("/v1/analyses/{analysis_id}", tags=["analysis"])
 async def get_analysis(analysis_id: str, principal: PrincipalDependency, store: StoreDependency) -> dict[str, object]:
-    repository = AnalysisRepository(store.database_path)
+    repository = analysis_repository(store)
     repository.migrate()
     return repository.get(principal, analysis_id)
+
+
+@app.get("/v1/projects/{project_id}/latest-analysis", tags=["analysis"])
+async def get_latest_project_analysis(
+    project_id: str, principal: PrincipalDependency, store: StoreDependency
+) -> dict[str, object]:
+    store.get_project(principal, project_id)
+    repository = analysis_repository(store)
+    repository.migrate()
+    return repository.latest_for_project(principal, project_id)
 
 
 @app.post("/v1/analyses/{analysis_id}/ai-review", tags=["analysis"])
 async def create_ai_review(
     analysis_id: str, principal: PrincipalDependency, store: StoreDependency
 ) -> dict[str, object]:
-    repository = AnalysisRepository(store.database_path)
+    repository = analysis_repository(store)
     repository.migrate()
     analysis = repository.get(principal, analysis_id)
     project = store.get_project(principal, str(analysis["projectId"]))
     manuscript = store.manuscript_record(principal, str(analysis["projectId"]))
-    profiles = JournalProfileRepository(str(store.database_path))
+    profiles = profile_repository(store)
     profile = profiles.get(str(analysis["profileVersionId"]))
     prompt, allowed_source_ids = build_editorial_prompt(
         journal_title=str(cast(dict[str, object], project["journal"])["title"]),
@@ -723,7 +821,7 @@ async def decide_recommendation(
     principal: PrincipalDependency,
     store: StoreDependency,
 ) -> dict[str, object]:
-    repository = AnalysisRepository(store.database_path)
+    repository = analysis_repository(store)
     repository.migrate()
     result = repository.decide(principal, analysis_id, recommendation_id, payload.decision, payload.modified_text)
     store.audit(
@@ -736,7 +834,7 @@ async def decide_recommendation(
 async def generate_artifacts(
     analysis_id: str, principal: PrincipalDependency, store: StoreDependency
 ) -> dict[str, object]:
-    repository = AnalysisRepository(store.database_path)
+    repository = analysis_repository(store)
     repository.migrate()
     analysis = repository.get(principal, analysis_id)
     manuscript = store.manuscript_record(principal, str(analysis["projectId"]))
@@ -807,19 +905,18 @@ async def generate_artifacts(
     }
     manifest = json.dumps(manifest_payload, indent=2, sort_keys=True).encode()
     validation = validate_artifacts(docx, revised_pdf, report_pdf, manifest)
-    result = store_artifact_set(
-        store,
-        repository,
-        principal,
-        analysis_id,
-        {
-            "revised-manuscript.docx": docx,
-            "revised-manuscript.pdf": revised_pdf,
-            "revision-report.pdf": report_pdf,
-            "provenance-manifest.json": manifest,
-        },
-        validation,
-    )
+    artifact_set = {
+        "revised-manuscript.docx": docx,
+        "revised-manuscript.pdf": revised_pdf,
+        "revision-report.pdf": report_pdf,
+        "provenance-manifest.json": manifest,
+    }
+    if isinstance(repository, HostedAnalysisRepository):
+        result = repository.store_artifacts(principal, analysis_id, artifact_set, validation)
+    else:
+        if not isinstance(store, FoundationStore):  # pragma: no cover - factory invariant
+            raise RuntimeError("Local analysis repository requires local foundation storage")
+        result = store_artifact_set(store, repository, principal, analysis_id, artifact_set, validation)
     store.audit(principal, "artifacts.generated", "analysis", analysis_id)
     return result
 
@@ -833,7 +930,7 @@ async def download_artifact(
     principal: PrincipalDependency,
     store: StoreDependency,
 ) -> Response:
-    repository = AnalysisRepository(store.database_path)
+    repository = analysis_repository(store)
     repository.migrate()
     key = repository.artifact_key(principal, analysis_id, kind)
     content = store.read_private_object(principal, key)

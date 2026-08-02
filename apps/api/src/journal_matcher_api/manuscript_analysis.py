@@ -584,6 +584,17 @@ class AnalysisRepository:
             "createdAt": run["created_at"],
         }
 
+    def latest_for_project(self, principal: Principal, project_id: str) -> dict[str, object]:
+        with closing(sqlite3.connect(self.database_path)) as connection:
+            row = connection.execute(
+                "SELECT id FROM analysis_runs WHERE project_id = ? AND workspace_id = ? "
+                "ORDER BY created_at DESC LIMIT 1",
+                (project_id, principal.workspace_id),
+            ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Analysis not found")
+        return self.get(principal, str(row[0]))
+
     def add_ai_review(
         self,
         principal: Principal,
