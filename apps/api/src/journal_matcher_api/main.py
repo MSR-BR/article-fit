@@ -6,6 +6,7 @@ import json
 import os
 import re
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from functools import lru_cache
@@ -328,7 +329,12 @@ async def execute_project_workflow(
     payload: WorkflowRequest,
     principal: Principal,
     store: Store,
+    progress_callback: Callable[[str, int], None] | None = None,
 ) -> dict[str, object]:
+    def report_progress(stage: str, progress: int) -> None:
+        if progress_callback is not None:
+            progress_callback(stage, progress)
+
     project = store.get_project(principal, project_id)
     if {str(item.get("slot")) for item in cast(list[dict[str, object]], project["documents"])} != {
         "manuscript",
@@ -337,6 +343,7 @@ async def execute_project_workflow(
         "reference-3",
     }:
         raise HTTPException(status_code=409, detail="The complete upload package is required")
+    report_progress("journal-resolution", 25)
     assisted = payload.has_assisted_guidance()
     resolved: dict[str, object]
     if assisted:
@@ -379,11 +386,12 @@ async def execute_project_workflow(
         str(resolved["issn"]),
         str(resolved["officialDomain"]),
     )
+    report_progress("official-guidance", 34)
     profiles = profile_repository(store)
     profiles.migrate()
     current_profile_version = profiles.current_version(str(resolved["issn"]))
     ingestion = store.start_job(principal, project_id, payload.idempotency_key)
-    research = await research_journal(
+    research = await _research_journal(
         project_id,
         ResearchRequest(
             scopeUrl=str(resolved["scopeUrl"]),
@@ -395,6 +403,7 @@ async def execute_project_workflow(
         ),
         principal,
         store,
+        report_progress,
     )
     profile = research.get("profileVersion")
     if not isinstance(profile, dict) or not profile.get("id"):
@@ -406,9 +415,13 @@ async def execute_project_workflow(
                 "warnings": research.get("warnings", []),
             },
         )
+    report_progress("manuscript-analysis", 62)
     analysis = await create_analysis(project_id, AnalysisRequest(profileVersionId=str(profile["id"])), principal, store)
+    report_progress("ai-review", 78)
     enriched = await create_ai_review(str(analysis["id"]), principal, store)
+    report_progress("artifact-generation", 90)
     artifact_result = await generate_artifacts(str(analysis["id"]), principal, store)
+    report_progress("artifact-generation", 98)
     profiles.delete_snapshots(str(profile["id"]))
     store.delete_source_documents(principal, project_id)
     return {
@@ -469,6 +482,16 @@ async def research_journal(
     principal: PrincipalDependency,
     store: StoreDependency,
 ) -> dict[str, object]:
+    return await _research_journal(project_id, payload, principal, store)
+
+
+async def _research_journal(
+    project_id: str,
+    payload: ResearchRequest,
+    principal: Principal,
+    store: Store,
+    progress_callback: Callable[[str, int], None] | None = None,
+) -> dict[str, object]:
     """Acquire bounded evidence and publish only a complete validated profile."""
     project = store.get_project(principal, project_id)
     journal = project.get("journal")
@@ -511,6 +534,8 @@ async def research_journal(
             access_status=guide_access,
         ),
     ]
+    if progress_callback is not None:
+        progress_callback("official-guidance", 40)
     now = datetime.now(UTC).date()
     candidates = client.crossref_candidates(
         str(journal["issn"]), f"{now.year - 5}-{now.month:02d}-{now.day:02d}", now.isoformat()
@@ -523,6 +548,8 @@ async def research_journal(
             )
         )
         preselected, _ = select_articles(candidates, str(journal["issn"]), set(), set(), today=now)
+    if progress_callback is not None:
+        progress_callback("recent-articles", 50)
     hydrated: list[ArticleCandidate] = []
     limitations: list[str] = []
     warnings: list[str] = []
@@ -540,6 +567,8 @@ async def research_journal(
                 full_text=full_text,
             )
         )
+    if progress_callback is not None:
+        progress_callback("recent-articles", 56)
     selected, selection_limitations = select_articles(hydrated, str(journal["issn"]), set(), set(), today=now)
     warnings.extend(selection_limitations)
     for article in selected:
@@ -602,6 +631,8 @@ async def research_journal(
         result["profileVersion"] = repository.publish(
             str(journal["issn"]), evidence, claims, limitations, payload.expected_profile_version
         )
+    if progress_callback is not None:
+        progress_callback("journal-profile", 62)
     store.audit(principal, "journal.researched", "project", project_id, {"status": str(result["status"])})
     return result
 

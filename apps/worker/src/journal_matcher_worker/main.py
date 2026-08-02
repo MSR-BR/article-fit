@@ -53,25 +53,65 @@ def process_message(store: HostedFoundationStore, queue_row: dict[str, Any]) -> 
     claimed = store.update_worker_job(
         job_id,
         state="running",
-        stage="journal-research",
-        progress=10,
+        stage="journal-resolution",
+        progress=25,
         increment_attempt=True,
     )
+    current_stage = "journal-resolution"
+    current_progress = 25
+
+    def report_progress(stage: str, progress: int) -> None:
+        nonlocal current_stage, current_progress
+        current_stage = stage
+        current_progress = progress
+        store.update_worker_job(
+            job_id,
+            state="running",
+            stage=stage,
+            progress=progress,
+        )
+
     try:
         request = WorkflowRequest.model_validate(workflow_payload)
         principal = Principal(user_id="article-fit-worker", workspace_id=str(claimed["workspace_id"]))
-        result = asyncio.run(execute_project_workflow(str(claimed["project_id"]), request, principal, store))
+        result = asyncio.run(
+            execute_project_workflow(
+                str(claimed["project_id"]),
+                request,
+                principal,
+                store,
+                progress_callback=report_progress,
+            )
+        )
     except (HTTPException, ValidationError, RuntimeError, ValueError) as error:
         attempts = int(claimed.get("attempt_count", 1))
         terminal = attempts >= 3
         error_code = f"workflow-{getattr(error, 'status_code', 'failed')}"
+        error_detail = str(getattr(error, "detail", error))[:500]
         store.update_worker_job(
             job_id,
             state="failed" if terminal else "queued",
-            stage="failed" if terminal else "awaiting-retry",
-            progress=int(claimed.get("progress", 10)),
+            stage=current_stage if terminal else "awaiting-retry",
+            progress=current_progress,
             error_code=error_code,
+            error_detail=error_detail,
             retry_eligible=not terminal,
+        )
+        print(
+            json.dumps(
+                {
+                    "event": "workflow.failed",
+                    "jobId": job_id,
+                    "stage": current_stage,
+                    "progress": current_progress,
+                    "errorCode": error_code,
+                    "errorType": type(error).__name__,
+                    "detail": error_detail,
+                    "terminal": terminal,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
         )
         if terminal:
             store.delete_source_documents(

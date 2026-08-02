@@ -1,6 +1,6 @@
 'use client';
 
-import { ChangeEvent, useMemo, useState } from 'react';
+import { ChangeEvent, useEffect, useMemo, useState } from 'react';
 
 type UploadState = {
   references: File[];
@@ -8,11 +8,123 @@ type UploadState = {
 };
 
 const progressStages = [
-  'Criando o projeto',
-  'Enviando e validando os arquivos',
-  'Pesquisando a revista e revisando o artigo',
-  'Arquivos prontos',
+  {
+    key: 'project',
+    label: 'Criando o projeto',
+    start: 0,
+    end: 8,
+    messages: ['Criando uma área temporária e privada para esta análise.'],
+  },
+  {
+    key: 'uploads',
+    label: 'Enviando e validando os arquivos',
+    start: 8,
+    end: 25,
+    messages: [
+      'Enviando os documentos selecionados.',
+      'Verificando formato, integridade e conteúdo extraível.',
+    ],
+  },
+  {
+    key: 'journal-resolution',
+    label: 'Identificando a revista e as páginas oficiais',
+    start: 25,
+    end: 40,
+    messages: [
+      'Confirmando a identidade da revista informada.',
+      'Localizando o escopo e o guia oficial dos autores.',
+    ],
+  },
+  {
+    key: 'journal-research',
+    label: 'Estudando o padrão editorial da revista',
+    start: 40,
+    end: 62,
+    messages: [
+      'Lendo o escopo e o guia oficial dos autores.',
+      'Buscando artigos recentes e versões abertas disponíveis.',
+      'Comparando a arquitetura e a redação dos artigos publicados.',
+    ],
+  },
+  {
+    key: 'manuscript-analysis',
+    label: 'Comparando seu artigo com o padrão encontrado',
+    start: 62,
+    end: 78,
+    messages: [
+      'Verificando estrutura, forma, conteúdo e apresentação científica.',
+      'Localizando trechos que precisam de ajuste para a revista.',
+    ],
+  },
+  {
+    key: 'ai-review',
+    label: 'Preparando as sugestões editoriais',
+    start: 78,
+    end: 90,
+    messages: [
+      'Redigindo sugestões ancoradas no texto original.',
+      'Revisando as sugestões para evitar mudanças científicas indevidas.',
+    ],
+  },
+  {
+    key: 'artifact-generation',
+    label: 'Gerando e validando os arquivos finais',
+    start: 90,
+    end: 100,
+    messages: [
+      'Gerando o relatório e o manuscrito com alterações destacadas.',
+      'Validando os arquivos antes de liberar os downloads.',
+    ],
+  },
 ] as const;
+
+type RunState = 'idle' | 'running' | 'succeeded' | 'failed';
+
+type JobStatus = {
+  state: string;
+  stage: string;
+  progress: number;
+  errorCode?: string | null;
+  errorDetail?: string | null;
+};
+
+function stageIndex(progress: number, backendStage?: string) {
+  const exact = progressStages.findIndex((stage) => stage.key === backendStage);
+  if (exact >= 0) return exact;
+  const current = progressStages.findIndex((stage) => progress < stage.end);
+  return current >= 0 ? current : progressStages.length - 1;
+}
+
+function stagePercentage(
+  stage: (typeof progressStages)[number],
+  progress: number,
+) {
+  if (progress >= stage.end) return 100;
+  if (progress <= stage.start) return 0;
+  return Math.round(
+    ((progress - stage.start) / (stage.end - stage.start)) * 100,
+  );
+}
+
+function workflowError(job: JobStatus) {
+  const code = job.errorCode ?? 'workflow-failed';
+  const stage =
+    progressStages[stageIndex(job.progress, job.stage)]?.label.toLowerCase() ??
+    'processamento';
+  const explanation = code.includes('502')
+    ? 'Um serviço externo de pesquisa ou de inteligência artificial respondeu com um erro temporário.'
+    : code.includes('503')
+      ? 'Um serviço necessário estava temporariamente indisponível.'
+      : code.includes('422')
+        ? 'O conteúdo recebido não pôde ser validado com segurança.'
+        : code.includes('409')
+          ? 'Faltaram dados ou evidências necessários para continuar com segurança.'
+          : 'O processamento foi interrompido antes da geração dos arquivos.';
+  const detail = job.errorDetail?.trim()
+    ? ` Motivo informado pelo servidor: ${job.errorDetail.trim()}`
+    : '';
+  return `${explanation}${detail} Etapa: ${stage}. Erro técnico: ${code}.`;
+}
 
 const artifactLabels: Record<string, string> = {
   'revision-report.pdf': 'Relatório de adequação (PDF)',
@@ -58,6 +170,9 @@ export default function HomePage() {
   const [journal, setJournal] = useState('');
   const [showProgress, setShowProgress] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
+  const [overallProgress, setOverallProgress] = useState(0);
+  const [runState, setRunState] = useState<RunState>('idle');
+  const [activityIndex, setActivityIndex] = useState(0);
   const [error, setError] = useState('');
   const [analysisId, setAnalysisId] = useState('');
   const [artifacts, setArtifacts] = useState<string[]>([]);
@@ -67,6 +182,18 @@ export default function HomePage() {
     scopeSnapshot: '',
     guideSnapshot: '',
   });
+
+  const activeMessages = progressStages[activeStep]?.messages ?? [];
+  const activityMessage =
+    activeMessages[activityIndex % Math.max(activeMessages.length, 1)] ?? '';
+
+  useEffect(() => {
+    if (runState !== 'running' || activeMessages.length < 2) return;
+    const timer = window.setInterval(() => {
+      setActivityIndex((current) => current + 1);
+    }, 3500);
+    return () => window.clearInterval(timer);
+  }, [activeStep, activeMessages.length, runState]);
 
   const assistedValues = Object.values(guidance).map((value) => value.trim());
   const assistedStarted = assistedValues.some(Boolean);
@@ -105,6 +232,8 @@ export default function HomePage() {
   async function startAnalysis() {
     if (!ready || !uploads.manuscript) return;
     setActiveStep(0);
+    setOverallProgress(2);
+    setRunState('running');
     setStarted(true);
     setShowProgress(true);
     setError('');
@@ -116,13 +245,14 @@ export default function HomePage() {
         body: JSON.stringify({ journalCandidate: journal.trim() }),
       });
       setActiveStep(1);
+      setOverallProgress(8);
       const documents = [
         ...uploads.references
           .slice(0, 3)
           .map((file, index) => ({ file, slot: `reference-${index + 1}` })),
         { file: uploads.manuscript, slot: 'manuscript' },
       ];
-      for (const { file, slot } of documents) {
+      for (const [index, { file, slot }] of documents.entries()) {
         await api(
           `/projects/${project.id}/documents/${slot}?filename=${encodeURIComponent(file.name)}`,
           {
@@ -134,8 +264,12 @@ export default function HomePage() {
             body: file,
           },
         );
+        setOverallProgress(
+          8 + Math.round(((index + 1) / documents.length) * 17),
+        );
       }
       setActiveStep(2);
+      setOverallProgress(25);
       const initiated = await api<{
         analysisId?: string;
         artifacts?: Array<{ kind: string }>;
@@ -154,24 +288,21 @@ export default function HomePage() {
       let workflow = initiated;
       if (!workflow.analysisId && workflow.id) {
         for (let attempt = 0; attempt < 300; attempt += 1) {
-          const job = await api<{
-            state: string;
-            progress: number;
-            errorCode?: string | null;
-          }>(`/jobs/${workflow.id}`);
-          setActiveStep(job.progress >= 100 ? 3 : 2);
+          const job = await api<JobStatus>(`/jobs/${workflow.id}`);
+          setOverallProgress(job.progress);
+          setActiveStep(stageIndex(job.progress, job.stage));
           if (job.state === 'failed' || job.state === 'cancelled') {
-            throw new Error(
-              job.errorCode
-                ? `A análise falhou (${job.errorCode}).`
-                : 'A análise não foi concluída.',
-            );
+            throw new Error(workflowError(job));
           }
           if (job.state === 'succeeded') {
-            workflow = await api<{
-              analysisId: string;
+            const latest = await api<{
+              id: string;
               artifacts: Array<{ kind: string }>;
             }>(`/projects/${project.id}/latest-analysis`);
+            workflow = {
+              analysisId: latest.id,
+              artifacts: latest.artifacts,
+            };
             break;
           }
           await new Promise((resolve) => window.setTimeout(resolve, 2000));
@@ -184,13 +315,17 @@ export default function HomePage() {
       }
       setAnalysisId(workflow.analysisId);
       setArtifacts(workflow.artifacts.map((item) => item.kind));
-      setActiveStep(3);
+      setOverallProgress(100);
+      setActiveStep(progressStages.length - 1);
+      setRunState('succeeded');
+      setStarted(false);
     } catch (caught) {
       setError(
         caught instanceof Error
           ? caught.message
           : 'Não foi possível concluir a análise.',
       );
+      setRunState('failed');
       setStarted(false);
     }
   }
@@ -400,8 +535,14 @@ export default function HomePage() {
               <div>
                 <p className="eyebrow">Andamento real</p>
                 <h2 id="progress-title">
-                  <span className="spinner" aria-hidden="true" />
-                  Preparando seu artigo
+                  {runState === 'running' && (
+                    <span className="spinner" aria-hidden="true" />
+                  )}
+                  {runState === 'failed'
+                    ? 'Análise interrompida'
+                    : runState === 'succeeded'
+                      ? 'Arquivos prontos'
+                      : 'Preparando seu artigo'}
                 </h2>
               </div>
               <button
@@ -413,49 +554,61 @@ export default function HomePage() {
                 ×
               </button>
             </div>
-            <p id="progress-description" className="progress-description">
-              Cada etapa é marcada somente após a confirmação do servidor.
-            </p>
+            {runState === 'running' ? (
+              <p
+                id="progress-description"
+                className="progress-description activity-line"
+                aria-live="polite"
+              >
+                <strong>Agora:</strong> {activityMessage}
+              </p>
+            ) : (
+              <p id="progress-description" className="progress-description">
+                {runState === 'succeeded'
+                  ? 'Processamento concluído e downloads liberados.'
+                  : 'O processamento foi encerrado. Consulte o erro abaixo.'}
+              </p>
+            )}
             <div
               className="progress-track determinate"
               role="progressbar"
               aria-label="Andamento da análise"
               aria-valuemin={0}
-              aria-valuemax={progressStages.length}
-              aria-valuenow={activeStep + 1}
+              aria-valuemax={100}
+              aria-valuenow={overallProgress}
             >
               <span
                 style={{
-                  width: `${((activeStep + 1) / progressStages.length) * 100}%`,
+                  width: `${overallProgress}%`,
                 }}
               />
             </div>
+            <p className="overall-progress">
+              Progresso geral: aproximadamente {overallProgress}%
+            </p>
             <ol className="progress-steps">
               {progressStages.map((stage, index) => {
                 const state =
-                  index < activeStep
+                  index < activeStep ||
+                  (runState === 'succeeded' && index === activeStep)
                     ? 'complete'
                     : index === activeStep
                       ? error
                         ? 'error'
-                        : 'active'
+                        : runState === 'running'
+                          ? 'active'
+                          : ''
                       : '';
-                const label =
-                  index < activeStep
-                    ? 'Concluído'
-                    : index === activeStep
-                      ? error
-                        ? 'Interrompido'
-                        : 'Em andamento'
-                      : 'Aguardando';
+                const percentage = stagePercentage(stage, overallProgress);
+                const label = `${percentage}%${index === activeStep && runState === 'running' ? ' aprox.' : ''}`;
                 return (
-                  <li className={state} key={stage}>
+                  <li className={state} key={stage.key}>
                     <span
                       className={state === 'active' ? 'step-spinner' : ''}
                       aria-hidden="true"
                     />
                     <div>
-                      <strong>{stage}</strong>
+                      <strong>{stage.label}</strong>
                       <small>{label}</small>
                     </div>
                   </li>
@@ -467,18 +620,11 @@ export default function HomePage() {
                 {error}
               </p>
             )}
-            {activeStep === progressStages.length - 1 && !error && (
+            {runState === 'succeeded' && !error && (
               <p className="preview-notice" role="status">
                 Análise concluída. Os arquivos estão disponíveis abaixo.
               </p>
             )}
-            <button
-              type="button"
-              className="background-button"
-              onClick={hideProgress}
-            >
-              Continuar em segundo plano
-            </button>
           </section>
         </div>
       )}

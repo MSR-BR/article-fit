@@ -342,6 +342,12 @@ h2 {
   color: #69716d;
   line-height: 1.5;
 }
+.activity-line {
+  min-height: 3rem;
+}
+.activity-line strong {
+  color: #244c3c;
+}
 
 .spinner {
   width: 1.15rem;
@@ -382,6 +388,12 @@ h2 {
   transform: none;
   animation: none;
   transition: width 500ms ease;
+}
+.overall-progress {
+  margin: 0.55rem 0 0;
+  color: #69716d;
+  font-size: 0.74rem;
+  text-align: right;
 }
 
 .progress-steps {
@@ -446,17 +458,6 @@ h2 {
 }
 .progress-steps small {
   font-size: 0.72rem;
-}
-
-.background-button {
-  width: 100%;
-  min-height: 2.9rem;
-  border: 1px solid #cfd4d0;
-  border-radius: 0.65rem;
-  background: transparent;
-  color: #356b58;
-  font-weight: 700;
-  cursor: pointer;
 }
 
 .preview-notice {

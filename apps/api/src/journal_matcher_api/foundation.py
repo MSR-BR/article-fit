@@ -114,6 +114,7 @@ class FoundationStore:
                     stage TEXT NOT NULL,
                     progress INTEGER NOT NULL,
                     error_code TEXT,
+                    error_detail TEXT,
                     retry_eligible INTEGER NOT NULL DEFAULT 0,
                     cancel_requested INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
@@ -132,6 +133,9 @@ class FoundationStore:
                 );
                 """
             )
+            columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(jobs)")}
+            if "error_detail" not in columns:
+                connection.execute("ALTER TABLE jobs ADD COLUMN error_detail TEXT")
 
     def audit(
         self,
@@ -301,7 +305,10 @@ class FoundationStore:
             job_id = new_id()
             now = utc_now()
             connection.execute(
-                "INSERT INTO jobs VALUES (?, ?, ?, ?, 'succeeded', 'ingestion-complete', 100, NULL, 0, 0, ?, ?)",
+                """INSERT INTO jobs
+                   (id, project_id, workspace_id, idempotency_key, state, stage, progress,
+                    error_code, error_detail, retry_eligible, cancel_requested, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, 'succeeded', 'ingestion-complete', 100, NULL, NULL, 0, 0, ?, ?)""",
                 (job_id, project_id, principal.workspace_id, idempotency_key, now, now),
             )
             row = connection.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
@@ -585,6 +592,7 @@ def job_payload(row: sqlite3.Row) -> dict[str, object]:
         "stage": row["stage"],
         "progress": row["progress"],
         "errorCode": row["error_code"],
+        "errorDetail": row["error_detail"],
         "retryEligible": bool(row["retry_eligible"]),
         "updatedAt": row["updated_at"],
     }

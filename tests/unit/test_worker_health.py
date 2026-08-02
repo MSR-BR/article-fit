@@ -83,19 +83,30 @@ def test_hosted_store_requires_server_credentials(monkeypatch: pytest.MonkeyPatc
 
 def test_worker_processes_and_acknowledges_message(monkeypatch: pytest.MonkeyPatch) -> None:
     async def successful_workflow(*args: object, **kwargs: object) -> dict[str, object]:
-        del args, kwargs
+        del args
+        progress_callback = kwargs["progress_callback"]
+        assert callable(progress_callback)
+        progress_callback("ai-review", 78)
+        progress_callback("artifact-generation", 98)
         return {"state": "succeeded"}
 
     monkeypatch.setattr("journal_matcher_worker.main.execute_project_workflow", successful_workflow)
     store = FakeHostedStore()
     assert process_message(store, QUEUE_ROW) is True  # type: ignore[arg-type]
     assert store.deleted == [7]
+    assert any(update.get("stage") == "ai-review" for update in store.updates)
+    assert any(update.get("progress") == 98 for update in store.updates)
     assert store.updates[-1]["state"] == "succeeded"
 
 
-def test_worker_retries_then_terminally_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_worker_retries_then_terminally_fails(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     async def failed_workflow(*args: object, **kwargs: object) -> dict[str, object]:
-        del args, kwargs
+        del args
+        progress_callback = kwargs["progress_callback"]
+        assert callable(progress_callback)
+        progress_callback("ai-review", 82)
         raise HTTPException(status_code=502, detail="provider failed")
 
     monkeypatch.setattr("journal_matcher_worker.main.execute_project_workflow", failed_workflow)
@@ -110,6 +121,12 @@ def test_worker_retries_then_terminally_fails(monkeypatch: pytest.MonkeyPatch) -
     assert terminal.deleted == [7]
     assert terminal.deleted_projects == ["project-1"]
     assert terminal.updates[-1]["state"] == "failed"
+    assert terminal.updates[-1]["stage"] == "ai-review"
+    assert terminal.updates[-1]["progress"] == 82
+    assert terminal.updates[-1]["error_detail"] == "provider failed"
+    failure_log = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert failure_log["errorCode"] == "workflow-502"
+    assert failure_log["detail"] == "provider failed"
 
 
 def test_worker_discards_poison_and_terminal_messages() -> None:

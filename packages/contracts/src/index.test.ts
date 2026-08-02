@@ -46,6 +46,7 @@ describe('base contracts', () => {
         stage: 'ingestion-complete',
         progress: 100,
         errorCode: null,
+        errorDetail: null,
         retryEligible: false,
         updatedAt: '2026-07-31T12:00:00+00:00',
       }).progress,

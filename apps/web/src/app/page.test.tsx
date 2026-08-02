@@ -104,9 +104,11 @@ describe('HomePage', () => {
       'active',
     );
     await waitFor(() =>
-      expect(screen.getByText('Arquivos prontos').closest('li')).toHaveClass(
-        'active',
-      ),
+      expect(
+        screen
+          .getByText('Gerando e validando os arquivos finais')
+          .closest('li'),
+      ).toHaveClass('complete'),
     );
     expect(
       screen.getByRole('link', { name: /Relatório de adequação/ }),
@@ -118,6 +120,114 @@ describe('HomePage', () => {
       screen.getByRole('link', { name: /Artigo revisado \(Word\)/ }),
     ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
+
+  it('uses the latest analysis id after an asynchronous job succeeds', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ id: 'project-async' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'reference-1' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'reference-2' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'reference-3' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'manuscript' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'job-1', state: 'queued' }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          state: 'succeeded',
+          stage: 'artifacts-ready',
+          progress: 100,
+          errorCode: null,
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: 'analysis-async',
+          artifacts: [{ kind: 'revision-report.pdf' }],
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    render(<HomePage />);
+    completePackage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Iniciar análise' }));
+
+    expect(
+      await screen.findByRole('link', { name: /Relatório de adequação/ }),
+    ).toHaveAttribute(
+      'href',
+      '/api/journal-matcher/analyses/analysis-async/artifacts/revision-report.pdf',
+    );
+    expect(
+      screen.getByRole('dialog', { name: 'Arquivos prontos' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('progressbar')).toHaveAttribute(
+      'aria-valuenow',
+      '100',
+    );
+    expect(screen.queryByText('Continuar em segundo plano')).toBeNull();
+    expect(document.querySelector('.spinner')).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(8);
+  });
+
+  it('explains a failed backend stage and stops every spinner', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ id: 'project-failed' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'reference-1' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'reference-2' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'reference-3' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'manuscript' }))
+      .mockResolvedValueOnce(
+        jsonResponse({ id: 'job-failed', state: 'queued' }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          state: 'failed',
+          stage: 'ai-review',
+          progress: 82,
+          errorCode: 'workflow-502',
+          errorDetail: 'O provedor de IA não respondeu dentro do limite.',
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    render(<HomePage />);
+    completePackage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Iniciar análise' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'serviço externo de pesquisa ou de inteligência artificial',
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent('workflow-502');
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'O provedor de IA não respondeu dentro do limite.',
+    );
+    expect(
+      screen.getByRole('dialog', { name: 'Análise interrompida' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Continuar em segundo plano')).toBeNull();
+    expect(document.querySelector('.spinner')).toBeNull();
+    expect(document.querySelector('.step-spinner')).toBeNull();
+  });
+
+  it('shows approximate progress and a live description while running', () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise<Response>(() => {})),
+    );
+    render(<HomePage />);
+    completePackage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Iniciar análise' }));
+
+    expect(
+      screen.getByText(/Progresso geral: aproximadamente 2%/),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Agora:')).toBeInTheDocument();
+    expect(screen.getByRole('progressbar')).toHaveAttribute(
+      'aria-valuenow',
+      '2',
+    );
   });
 
   it('asks for the remaining orientation articles', () => {

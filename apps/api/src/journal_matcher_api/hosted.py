@@ -463,6 +463,7 @@ class HostedFoundationStore:
         stage: str,
         progress: int,
         error_code: str | None = None,
+        error_detail: str | None = None,
         retry_eligible: bool = False,
         increment_attempt: bool = False,
     ) -> dict[str, Any]:
@@ -474,6 +475,7 @@ class HostedFoundationStore:
             "stage": stage,
             "progress": progress,
             "error_code": error_code,
+            "error_detail": error_detail,
             "retry_eligible": retry_eligible,
             "updated_at": utc_now(),
         }
@@ -732,6 +734,7 @@ def hosted_job_payload(row: dict[str, Any]) -> dict[str, object]:
         "stage": row["stage"],
         "progress": row["progress"],
         "errorCode": row.get("error_code"),
+        "errorDetail": row.get("error_detail"),
         "retryEligible": bool(row.get("retry_eligible", False)),
         "updatedAt": row["updated_at"],
     }

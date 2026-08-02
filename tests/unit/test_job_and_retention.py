@@ -15,7 +15,10 @@ def test_cancel_queued_job_and_purge_expired_project(store: FoundationStore) -> 
     job_id = new_id()
     with store.connect() as connection:
         connection.execute(
-            "INSERT INTO jobs VALUES (?, ?, ?, ?, 'queued', 'validation', 0, NULL, 0, 0, ?, ?)",
+            """INSERT INTO jobs
+               (id, project_id, workspace_id, idempotency_key, state, stage, progress,
+                error_code, error_detail, retry_eligible, cancel_requested, created_at, updated_at)
+               VALUES (?, ?, ?, ?, 'queued', 'validation', 0, NULL, NULL, 0, 0, ?, ?)""",
             (job_id, project["id"], WORKSPACE_A, "queued-key", utc_now(), utc_now()),
         )
     cancelled = store.cancel_job(principal, job_id)
