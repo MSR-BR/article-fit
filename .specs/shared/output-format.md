@@ -42,15 +42,18 @@ Every change has:
 
 ## Revision report sections
 
-1. Executive summary and prominent “no acceptance guarantee” notice.
-2. Input completeness, journal identity, analyzed article set, and source limitations.
-3. Official scope fit and author-guide compliance matrix.
-4. High-priority scientific and methodological issues.
-5. Article architecture and section-by-section analysis.
-6. Language, presentation, figures/tables, references, declarations, and layout.
-7. Full change ledger ordered by severity and manuscript location.
-8. Unresolved questions and required author actions.
-9. Sources, retrieval dates, journal-profile version, confidence, and reproducibility summary.
+1. Executive verdict and prominent “no acceptance guarantee” notice.
+2. Evidence boundary, analyzed article set, and source limitations.
+3. Official journal Scope and audience fit.
+4. Manuscript-bibliography coverage, recent literature, novelty, safe claims, and claims to avoid.
+5. Direct comparison with the editorial execution observed in the target journal.
+6. High-priority scientific, methodological, validation, and structural upgrades.
+7. Recommended manuscript architecture and section-by-section analysis.
+8. Title options, proposed abstract/significance framing, and figure plan.
+9. Official Guide for Authors compliance.
+10. Staged action plan ordered by priority.
+11. Full change ledger ordered by severity and manuscript location.
+12. Human-readable sources, unresolved questions, and final recommendation.
 
 ## Integrity requirements
 

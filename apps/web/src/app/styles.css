@@ -601,6 +601,15 @@ h2 {
   border-radius: 0.8rem;
   padding: 0.9rem 1rem;
 }
+.assisted-guidance summary {
+  cursor: pointer;
+  color: #356b58;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.assisted-guidance[open] summary {
+  margin-bottom: 0.75rem;
+}
 .assisted-guidance > p {
   color: #69716d;
   font-size: 0.85rem;

@@ -32,6 +32,9 @@ from journal_matcher_api.foundation import FoundationStore, Principal
 
 Decision = Literal["accepted", "rejected", "modified"]
 CATEGORY_COLORS = {
+    "scope-fit": "2F5597",
+    "literature-positioning": "7030A0",
+    "novelty-significance": "C00000",
     "form": "1F4E79",
     "language": "1F4E79",
     "structure": "7030A0",
@@ -482,7 +485,7 @@ def build_recommendations(
         )
     add(
         "scope-fit-author-review",
-        "unresolved",
+        "scope-fit",
         "question",
         "Scope fit requires scientific judgment and cannot be established from keyword overlap alone.",
         "expert-suggestion",
@@ -491,6 +494,41 @@ def build_recommendations(
         "researchers beyond the immediate quantum-thermodynamics specialty.",
         True,
         original="" if prompt_like_upload else abstract[:400],
+    )
+    bibliography = re.split(r"\n\s*(?:references|bibliography)\b", manuscript_text, maxsplit=1, flags=re.I)
+    bibliography_text = bibliography[1] if len(bibliography) == 2 else ""
+    reference_entries = re.findall(r"(?m)^\s*(?:\[\d+\]|\d+[.)])\s+", bibliography_text)
+    add(
+        "literature-positioning-review",
+        "literature-positioning",
+        "question",
+        (
+            f"The deterministic extraction found approximately {len(reference_entries)} numbered bibliography "
+            "entries; topical coverage, close prior work, and novelty still require source-by-source review."
+            if bibliography_text
+            else "No reliably delimited References or Bibliography section was found in the extracted manuscript."
+        ),
+        "expert-suggestion",
+        [],
+        "Verify every central claim against the cited bibliography and recent literature; identify the closest "
+        "work explicitly, state the non-overlapping advance, add missing citations, and narrow any priority claim "
+        "that cannot be supported.",
+        True,
+        original=bibliography_text[:500],
+    )
+    add(
+        "novelty-significance-gate",
+        "novelty-significance",
+        "question",
+        "A journal-level novelty claim must distinguish a new result from a new presentation of known equations, "
+        "known limiting behavior, or a direct corollary of cited work.",
+        "expert-suggestion",
+        [],
+        "Write a one-sentence novelty claim naming the closest result, the exact technical difference, the new "
+        "evidence supplied here, and the consequence for a broader physics audience. List claims that should be "
+        "avoided because the literature already supports them.",
+        True,
+        original="" if prompt_like_upload else abstract[:500],
     )
     return recommendations
 
@@ -931,6 +969,37 @@ def create_docx(text: str, recommendations: list[dict[str, object]], reconstruct
     return output.getvalue()
 
 
+def _word_suggestion_block(item: dict[str, object]) -> str:
+    category = str(item.get("reviewDimension") or item.get("category") or "editorial review")
+    color = CATEGORY_COLORS.get(str(item.get("category")), "1F4E79")
+    original, _ = _latex_parts(item.get("originalText"))
+    pattern, _ = _latex_parts(item.get("referencePattern") or item.get("journalExpectation") or item.get("basis"))
+    rationale, _ = _latex_parts(item.get("rationale"))
+    action, _ = _latex_parts(item.get("authorAction") or item.get("proposedText") or item.get("rationale"))
+    proposed, _ = _latex_parts(item.get("modifiedText") or item.get("proposedText"))
+    parts = [
+        _word_paragraph(f"ARTICLE FIT — {category.replace('-', ' ').upper()}", color=color, bold=True),
+    ]
+    if original:
+        parts.append(_word_paragraph(f"CURRENT MANUSCRIPT: {original}", color="000000"))
+    if pattern:
+        parts.append(_word_paragraph(f"JOURNAL/REFERENCE PATTERN: {pattern}", color="666666"))
+    if rationale:
+        parts.append(_word_paragraph(f"WHY THIS MATTERS: {rationale}", color="000000"))
+    parts.append(_word_paragraph(f"AUTHOR ACTION: {action}", color=color, bold=True))
+    if proposed:
+        parts.append(_word_paragraph(f"SUGGESTED WORDING: {proposed}", color=color))
+    if item.get("scientificImpact") or item.get("authorValidationRequired"):
+        parts.append(
+            _word_paragraph(
+                "AUTHOR VALIDATION REQUIRED BEFORE ADOPTING THIS SCIENTIFIC CHANGE.",
+                color="C00000",
+                bold=True,
+            )
+        )
+    return "".join(parts)
+
+
 def annotate_docx(original: bytes, recommendations: list[dict[str, object]]) -> bytes:
     """Preserve an uploaded DOCX package and add color-coded suggestions near their anchors."""
     try:
@@ -960,14 +1029,7 @@ def annotate_docx(original: bytes, recommendations: list[dict[str, object]]) -> 
         if re.search(r"<w:t(?:\s[^>]*)?>.*?</w:t>", match.group(0), re.S):
             logical_index += 1
             for item in anchored.get(logical_index, []):
-                proposed = item.get("modifiedText") or item.get("proposedText") or item.get("rationale")
-                visible_proposed, _ = _latex_parts(proposed)
-                rebuilt.append(
-                    _word_paragraph(
-                        f"ARTICLE FIT SUGGESTION [{item['category']}]: {visible_proposed}",
-                        color=CATEGORY_COLORS.get(str(item["category"]), "1F4E79"),
-                    )
-                )
+                rebuilt.append(_word_suggestion_block(item))
     rebuilt.append(document[cursor:])
     document = "".join(rebuilt)
 
@@ -975,12 +1037,7 @@ def annotate_docx(original: bytes, recommendations: list[dict[str, object]]) -> 
     if unanchored:
         notes += _word_paragraph("Article Fit — manuscript-level suggestions", color="2E74B5", bold=True)
     for item in unanchored:
-        proposed = item.get("modifiedText") or item.get("proposedText") or item.get("rationale")
-        visible_proposed, _ = _latex_parts(proposed)
-        notes += _word_paragraph(
-            f"ARTICLE FIT SUGGESTION [{item['category']}] {item['anchor']}: {visible_proposed}",
-            color=CATEGORY_COLORS.get(str(item["category"]), "1F4E79"),
-        )
+        notes += _word_suggestion_block(item)
     insertion = document.rfind("<w:sectPr")
     if insertion < 0:
         insertion = document.rfind("</w:body>")

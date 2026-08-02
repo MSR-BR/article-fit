@@ -218,6 +218,7 @@ def test_editorial_report_is_structured_and_hides_machine_ids() -> None:
                 "proposedText": "Proposed passage.",
                 "rationale": "State the decisive result earlier.",
                 "scientificImpact": False,
+                "sourceLabels": ["Official Physical Review Letters Scope"],
             }
         ],
         rules=[],
@@ -226,7 +227,11 @@ def test_editorial_report_is_structured_and_hides_machine_ids() -> None:
     )
     text = " ".join(page.extract_text() or "" for page in PdfReader(BytesIO(report)).pages)
     assert "Executive verdict" in text
+    assert "Journal scope and audience fit" in text
+    assert "Literature positioning and novelty" in text
+    assert "Scientific and structural upgrades" in text
     assert "Detailed revision ledger" in text
+    assert "Official Physical Review Letters Scope" in text
     assert "Proposed passage" in text
     assert r"\left\langle" not in text
     assert "/Subtype /Image" in report.decode("latin-1", errors="ignore")

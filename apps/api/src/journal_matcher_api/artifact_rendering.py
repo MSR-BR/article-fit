@@ -25,6 +25,9 @@ PALE_BLUE = (0.93, 0.96, 0.99)
 BLACK = (0.0, 0.0, 0.0)
 
 CATEGORY_LABELS = {
+    "scope-fit": "Journal scope and audience fit",
+    "literature-positioning": "Literature positioning and citation coverage",
+    "novelty-significance": "Novelty, significance, and safe claims",
     "form": "Form and layout",
     "structure": "Article architecture",
     "language": "Language and rhetoric",
@@ -47,6 +50,8 @@ CATEGORY_LABELS = {
 def _without_raw_latex(value: object) -> str:
     """Keep generated PDFs readable when the source contains TeX control sequences."""
     text = str(value or "")
+    while r"\\" in text:
+        text = text.replace(r"\\", "\\")
     replacements = {
         r"\left": "",
         r"\right": "",
@@ -65,6 +70,7 @@ def _without_raw_latex(value: object) -> str:
     }
     for source, target in replacements.items():
         text = text.replace(source, target)
+    text = re.sub(r"\\([A-Za-z]+)", r"\1", text)
     text = text.replace("{", "(").replace("}", ")").replace("$", "")
     return " ".join(text.split())
 
@@ -216,7 +222,7 @@ class EditorialPdf:
     def bullet(self, value: object, *, color: tuple[float, float, float] = BLACK) -> None:
         self._ensure(28)
         self.text_at(79, self.y, "-", font="F4", size=10.2, color=TEAL)
-        self.paragraph(value, color=color, indent=20, gap=4)
+        self.paragraph(_without_raw_latex(value), color=color, indent=20, gap=4)
 
     def label_value(self, label: str, value: object, *, value_color: tuple[float, float, float] = BLACK) -> None:
         self._ensure(30)
@@ -228,6 +234,8 @@ class EditorialPdf:
             self.math_expression(expression, color=value_color)
 
     def math_expression(self, expression: str, *, color: tuple[float, float, float] = BLUE) -> None:
+        while r"\\" in expression:
+            expression = expression.replace(r"\\", "\\")
         image = BytesIO()
         rgb = "#" + "".join(f"{round(channel * 255):02x}" for channel in color)
         try:
@@ -248,7 +256,7 @@ class EditorialPdf:
         self.y = y - 8
 
     def callout(self, title: str, body: object, *, color: tuple[float, float, float] = BLUE) -> None:
-        body_text = " ".join(_latin(body).split())
+        body_text = " ".join(_latin(_without_raw_latex(body)).split())
         lines = textwrap.wrap(body_text, width=78, break_long_words=False, break_on_hyphens=False) or [""]
         height = 39 + len(lines) * 13
         self._ensure(height + 10)
@@ -435,6 +443,24 @@ def create_editorial_report_pdf(
     )
 
     pdf.new_page()
+    pdf.heading("Contents")
+    for entry in (
+        "1  Executive verdict",
+        "2  Evidence boundary and limitations",
+        "3  Journal scope and audience fit",
+        "4  Literature positioning and novelty",
+        "5  Direct comparison with the target journal",
+        "6  Scientific and structural upgrades",
+        "7  Recommended manuscript architecture",
+        "8  Title, abstract, significance, and figure plan",
+        "9  Official-guide compliance",
+        "10 Staged action plan",
+        "11 Detailed revision ledger",
+        "12 Sources and final recommendation",
+    ):
+        pdf.paragraph(entry, color=NAVY, size=10.5, gap=6)
+
+    pdf.new_page()
     pdf.heading("1  Executive verdict")
     pdf.callout(
         verdict,
@@ -456,7 +482,7 @@ def create_editorial_report_pdf(
         f"Evidence base: official Scope and Guide for Authors plus {reference_count} supplied/found journal article(s)."
     )
 
-    pdf.heading("2  Evidence boundary")
+    pdf.heading("2  Evidence boundary and limitations")
     pdf.paragraph(
         "Official requirements are treated as requirements only when supported by validated official guidance. "
         "Patterns observed in published articles are advisory, not rules. Editorial suggestions are explicitly "
@@ -465,15 +491,119 @@ def create_editorial_report_pdf(
     for limitation in limitations:
         pdf.bullet(limitation, color=GRAY)
 
-    pdf.heading("3  Priority action plan")
-    for index, item in enumerate(items[:10], 1):
-        category = CATEGORY_LABELS.get(str(item.get("category")), str(item.get("category", "Editorial")))
-        action = item.get("authorAction") or item.get("proposedText") or item.get("rationale") or "Review this item."
-        pdf.bullet(f"{index}. {category} at {item.get('anchor', 'document')}: {action}")
-    if len(items) > 10:
-        pdf.paragraph(f"The detailed ledger contains {len(items) - 10} additional recommendations.", color=GRAY)
+    by_category: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for item in items:
+        by_category[str(item.get("category", "unresolved"))].append(item)
 
-    pdf.heading("4  Official-guide compliance")
+    pdf.heading("3  Journal scope and audience fit")
+    scope_items = by_category.get("scope-fit", [])
+    if scope_items:
+        pdf.paragraph(
+            "This section tests whether the manuscript's central question, claimed advance, intended audience, "
+            "and degree of generality are recognizable within the official journal scope."
+        )
+        for item in scope_items:
+            pdf.recommendation(scope_items.index(item) + 1, item)
+    else:
+        pdf.paragraph(
+            "No evidence-bounded scope-fit assessment was returned. Treat journal fit as unresolved and verify "
+            "the manuscript directly against the official Scope before submission.",
+            color=RED,
+        )
+
+    pdf.heading("4  Literature positioning and novelty")
+    literature_items = [
+        *by_category.get("literature-positioning", []),
+        *by_category.get("novelty-significance", []),
+    ]
+    if literature_items:
+        pdf.paragraph(
+            "The manuscript bibliography and a recent-literature search are used here to identify close work, "
+            "citation gaps, derivative claims, defensible distinctions, and novelty risks. Search results remain "
+            "candidates until the authors verify the underlying papers."
+        )
+        for index, item in enumerate(literature_items, 1):
+            pdf.recommendation(index, item)
+    else:
+        pdf.paragraph(
+            "No responsible literature-positioning result was available. A targeted novelty and citation audit "
+            "is required before submission.",
+            color=RED,
+        )
+
+    pdf.heading("5  Direct comparison with the target journal")
+    pdf.paragraph(
+        "The comparison below concerns editorial execution: compression, narrative architecture, disclosure of "
+        "assumptions, level of validation, result presentation, figure logic, and conclusion style. It does not "
+        "treat unrelated reference-paper physics as a content standard."
+    )
+    comparison_items = [
+        item
+        for item in items
+        if str(item.get("category"))
+        in {"scientific-framing", "theory-methodology", "validation-robustness", "results-analysis", "writing"}
+    ]
+    for item in comparison_items[:12]:
+        pdf.label_value("Manuscript location", item.get("anchor", "document"))
+        pdf.label_value("Published-journal expectation", item.get("referencePattern") or item.get("journalExpectation"))
+        pdf.label_value("Observed gap", item.get("rationale", ""))
+        pdf.label_value(
+            "Required author action",
+            item.get("authorAction") or item.get("proposedText"),
+            value_color=BLUE,
+        )
+        pdf.rule(pdf.y, color=(0.82, 0.84, 0.85), width=0.6)
+        pdf.y -= 8
+
+    pdf.heading("6  Scientific and structural upgrades")
+    substantive = [
+        item
+        for item in items
+        if str(item.get("interventionType"))
+        in {"new-analysis", "new-measurement", "new-figure", "new-validation", "cut-or-move", "restructure"}
+    ]
+    if substantive:
+        pdf.paragraph(
+            "These are not cosmetic edits. They identify calculations, measurements, robustness checks, figures, "
+            "cuts, or structural moves that must be evaluated against the manuscript's actual evidence."
+        )
+        for item in substantive:
+            kind = str(item.get("interventionType", "author action")).replace("-", " ").title()
+            pdf.callout(
+                kind,
+                f"{item.get('anchor', 'document')}: {item.get('authorAction') or item.get('rationale', '')}",
+                color=RED if item.get("scientificImpact") else BLUE,
+            )
+    else:
+        pdf.paragraph(
+            "No responsible substantive action was returned. Surface editing alone is not a complete scientific "
+            "assessment; complete an expert content review before submission.",
+            color=RED,
+        )
+
+    pdf.heading("7  Recommended manuscript architecture")
+    architecture_items = by_category.get("structure", [])
+    if architecture_items:
+        for index, item in enumerate(architecture_items, 1):
+            pdf.bullet(
+                f"Step {index} - {item.get('anchor', 'document')}: "
+                f"{item.get('authorAction') or item.get('proposedText') or item.get('rationale')}"
+            )
+    else:
+        pdf.paragraph("Retain the current architecture only after checking it against the detailed ledger.")
+
+    pdf.heading("8  Title, abstract, significance, and figure plan")
+    framing_items = [
+        item
+        for item in items
+        if str(item.get("category")) in {"writing", "scientific-framing", "novelty-significance", "figures-equations"}
+    ]
+    for item in framing_items[:12]:
+        proposed = item.get("modifiedText") or item.get("proposedText")
+        label = CATEGORY_LABELS.get(str(item.get("category")), "Recommended revision")
+        pdf.label_value(label, proposed or item.get("authorAction") or item.get("rationale"), value_color=BLUE)
+
+    pdf.heading("9  Official-guide compliance")
     if not rules:
         pdf.paragraph(
             "No machine-verifiable official rule was extracted. Consult the supplied official guidance directly "
@@ -485,7 +615,15 @@ def create_editorial_report_pdf(
         key = str(rule.get("key", "official requirement")).replace("-", " ").title()
         pdf.bullet(f"{key}: {status}. The detailed recommendation states the required author action.")
 
-    pdf.heading("5  Scientific and editorial comparison")
+    pdf.heading("10  Staged action plan")
+    for index, item in enumerate(items[:10], 1):
+        category = CATEGORY_LABELS.get(str(item.get("category")), str(item.get("category", "Editorial")))
+        action = item.get("authorAction") or item.get("proposedText") or item.get("rationale") or "Review this item."
+        pdf.bullet(f"{index}. {category} at {item.get('anchor', 'document')}: {action}")
+    if len(items) > 10:
+        pdf.paragraph(f"The detailed ledger contains {len(items) - 10} additional recommendations.", color=GRAY)
+
+    pdf.heading("Cross-dimension editorial ledger", level=2)
     categories: dict[str, list[dict[str, object]]] = defaultdict(list)
     for item in items:
         categories[
@@ -504,31 +642,7 @@ def create_editorial_report_pdf(
                 f"Action: {item.get('authorAction') or item.get('proposedText') or 'Author revision required.'}"
             )
 
-    substantive = [
-        item
-        for item in items
-        if str(item.get("interventionType"))
-        in {"new-analysis", "new-measurement", "new-figure", "new-validation", "cut-or-move", "restructure"}
-    ]
-    pdf.heading("6  Substantive scientific and structural work")
-    if substantive:
-        pdf.paragraph(
-            "These are not cosmetic edits. They identify analyses, validation, measurements, figures, cuts, or "
-            "structural moves that the authors should evaluate against the manuscript's actual evidence."
-        )
-        for item in substantive:
-            kind = str(item.get("interventionType", "author action")).replace("-", " ").title()
-            pdf.bullet(
-                f"{kind} at {item.get('anchor', 'document')}: {item.get('authorAction') or item.get('rationale', '')}"
-            )
-    else:
-        pdf.paragraph(
-            "No responsible substantive action was returned. The analysis should be rerun rather than treating "
-            "surface edits as a complete scientific review.",
-            color=RED,
-        )
-
-    pdf.heading("7  Detailed revision ledger")
+    pdf.heading("11  Detailed revision ledger")
     pdf.paragraph(
         "Each entry states the location, the observed gap, the action to take, and proposed wording when a "
         "responsible rewrite can be made without inventing scientific content. Blue wording is a suggestion, "
@@ -537,7 +651,16 @@ def create_editorial_report_pdf(
     for index, item in enumerate(items, 1):
         pdf.recommendation(index, item)
 
-    pdf.heading("8  Submission gate")
+    pdf.heading("12  Sources and final recommendation")
+    source_labels: list[str] = []
+    for item in items:
+        values = item.get("sourceLabels", [])
+        if isinstance(values, list):
+            source_labels.extend(str(value) for value in values if value)
+    for label in list(dict.fromkeys(source_labels))[:80]:
+        pdf.bullet(label, color=GRAY)
+    if not source_labels:
+        pdf.paragraph("No human-readable source catalogue was available in this run.", color=RED)
     pdf.callout(
         "Recommended next pass",
         "Resolve all mandatory items; complete the high-priority architecture and presentation revisions; have "

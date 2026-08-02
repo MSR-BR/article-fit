@@ -8,6 +8,7 @@ from journal_matcher_api.gemini import (
     FeedbackLesson,
     GeminiFeedbackResult,
     GeminiMemoryResult,
+    GeminiProviderError,
     GeminiResult,
     JournalMemoryResponse,
 )
@@ -19,6 +20,9 @@ from tests.integration.test_journal_research_flow import FakeProvider, prepare_p
 def complete_editorial_proposals(anchor: str) -> list[dict[str, object]]:
     dimensions = [
         "scientific-framing",
+        "scope-fit",
+        "literature-positioning",
+        "novelty-significance",
         "theory-methodology",
         "validation-robustness",
         "results-analysis",
@@ -30,6 +34,7 @@ def complete_editorial_proposals(anchor: str) -> list[dict[str, object]]:
         "validation-robustness",
         "results-analysis",
         "structure",
+        "writing",
     ]
     return [
         {
@@ -143,6 +148,42 @@ def test_analysis_review_artifacts_and_tenant_isolation(
     assert client.get(f"/v1/analyses/{analysis['id']}", headers=auth()).status_code == 404
 
 
+def test_provider_rejection_degrades_without_losing_deliverables(client: TestClient, monkeypatch) -> None:
+    class RejectedGemini:
+        def synthesize_memory(self, _prompt: str) -> GeminiMemoryResult:
+            raise GeminiProviderError("Gemini request failed with HTTP 400")
+
+        def generate(self, _prompt: str) -> GeminiResult:
+            raise GeminiProviderError("Gemini request failed with HTTP 400")
+
+    monkeypatch.setenv("JOURNAL_MATCHER_PROVIDER_EMAIL", "research@example.org")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(main, "PoliteHttpClient", FakeProvider)
+    monkeypatch.setattr(main, "GeminiEditorialClient", RejectedGemini)
+    project_id = prepare_project(client)
+    profile_id = create_profile(client, project_id)
+
+    analysis_response = client.post(
+        f"/v1/projects/{project_id}/analyses",
+        headers=auth(),
+        json={"profileVersionId": profile_id},
+    )
+    assert analysis_response.status_code == 201
+    analysis_id = analysis_response.json()["id"]
+
+    review = client.post(f"/v1/analyses/{analysis_id}/ai-review", headers=auth())
+    assert review.status_code == 200
+    assert any("deterministic checks" in item for item in review.json()["limitations"])
+
+    artifacts = client.post(f"/v1/analyses/{analysis_id}/artifacts", headers=auth())
+    assert artifacts.status_code == 201
+    assert {item["kind"] for item in artifacts.json()["artifacts"]} == {
+        "revision-report.pdf",
+        "revised-manuscript.docx",
+        "revised-manuscript.pdf",
+    }
+
+
 def test_real_workflow_orchestrator_reaches_downloadable_artifacts(
     client: TestClient, store: FoundationStore, monkeypatch
 ) -> None:
@@ -253,7 +294,8 @@ def test_real_workflow_orchestrator_reaches_downloadable_artifacts(
         == []
     )
     profile_id = str(workflow["research"]["profileVersion"]["id"])
-    assert main.profile_repository(store).official_snapshots(profile_id) == []
+    snapshots = main.profile_repository(store).official_snapshots(profile_id)
+    assert {snapshot["source_type"] for snapshot in snapshots} == {"official-scope", "official-guide"}
     for kind in ("revised-manuscript.docx", "revised-manuscript.pdf", "revision-report.pdf"):
         assert client.get(f"/v1/analyses/{workflow['analysisId']}/artifacts/{kind}", headers=auth()).status_code == 200
 

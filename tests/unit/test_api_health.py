@@ -63,7 +63,7 @@ def test_worker_trigger_fails_closed_without_metadata_token(monkeypatch: pytest.
 
 def test_workflow_request_requires_complete_guidance_and_identity() -> None:
     incomplete_guidance = WorkflowRequest(idempotencyKey="request-001", scopeUrl="https://example.org/scope")
-    with pytest.raises(HTTPException, match="complete assisted-guidance"):
+    with pytest.raises(HTTPException, match="both official guidance URLs"):
         incomplete_guidance.has_assisted_guidance()
 
     incomplete_identity = WorkflowRequest(idempotencyKey="request-002", journalTitle="Example Journal")

@@ -80,6 +80,42 @@ def test_resolve_journal_returns_attributable_official_pages(client: TestClient,
     assert client.post("/v1/journals/resolve", json={"candidate": "Physical Review Letters"}).status_code == 401
 
 
+def test_resolve_journal_follows_official_navigation_page(client: TestClient, monkeypatch) -> None:
+    class NavigationProvider:
+        def __init__(self, _contact_email: str) -> None:
+            pass
+
+        def get(self, url: str, *, allowed_domain: str | None = None) -> bytes:
+            if "api.openalex.org/sources" in url:
+                return json.dumps(
+                    {
+                        "results": [
+                            {
+                                "id": "https://openalex.org/S123",
+                                "display_name": "Physical Review Letters",
+                                "alternate_titles": ["PRL"],
+                                "issn_l": "0031-9007",
+                                "homepage_url": "https://journals.aps.org/prl",
+                                "type": "journal",
+                            }
+                        ]
+                    }
+                ).encode()
+            assert allowed_domain == "journals.aps.org"
+            if url == "https://journals.aps.org/prl":
+                return b'<a href="/prl/journal-info">Journal information</a>'
+            return b'<a href="/prl/about">Scope</a><a href="/prl/authors">Guide for Authors</a>'
+
+    monkeypatch.setenv("JOURNAL_MATCHER_PROVIDER_EMAIL", "research@example.org")
+    monkeypatch.setattr(main, "PoliteHttpClient", NavigationProvider)
+
+    response = client.post("/v1/journals/resolve", headers=auth(), json={"candidate": "Physical Review Letters"})
+
+    assert response.status_code == 200
+    assert response.json()["scopeUrl"] == "https://journals.aps.org/prl/about"
+    assert response.json()["guideUrl"] == "https://journals.aps.org/prl/authors"
+
+
 def prepare_project(client: TestClient) -> str:
     project_id = create_project(client)
     response = client.put(

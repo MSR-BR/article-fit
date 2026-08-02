@@ -14,7 +14,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Annotated, Literal, cast
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode, urljoin, urlparse
 from urllib.request import Request, urlopen
 
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Response, status
@@ -61,8 +61,15 @@ from journal_matcher_api.journal_research import (
 )
 from journal_matcher_api.journal_resolution import (
     JournalResolutionError,
+    OfficialGuidance,
     discover_official_guidance,
     resolve_openalex_sources,
+)
+from journal_matcher_api.literature_audit import (
+    extract_manuscript_literature_context,
+    manuscript_reference_evidence,
+    recent_literature_evidence,
+    source_catalog,
 )
 from journal_matcher_api.manuscript_analysis import (
     AnalysisRepository,
@@ -141,10 +148,14 @@ class WorkflowRequest(BaseModel):
     guide_snapshot: str | None = Field(alias="guideSnapshot", default=None, min_length=500, max_length=200_000)
 
     def has_assisted_guidance(self) -> bool:
-        values = (self.scope_url, self.guide_url, self.scope_snapshot, self.guide_snapshot)
-        if any(values) and not all(values):
-            raise HTTPException(status_code=422, detail="The complete assisted-guidance package is required")
-        return all(values)
+        urls = (self.scope_url, self.guide_url)
+        if any(urls) and not all(urls):
+            raise HTTPException(status_code=422, detail="Provide both official guidance URLs or neither")
+        if (self.scope_snapshot or self.guide_snapshot) and not all(urls):
+            raise HTTPException(status_code=422, detail="Guidance text requires its official URLs")
+        if bool(self.scope_snapshot) != bool(self.guide_snapshot):
+            raise HTTPException(status_code=422, detail="Provide both guidance snapshots or neither")
+        return all(urls)
 
     def has_supplied_identity(self) -> bool:
         values = (self.journal_title, self.journal_issn)
@@ -260,7 +271,34 @@ async def resolve_journal(payload: JournalResolveRequest, principal: PrincipalDe
         homepage = client.get(journal.homepage_url, allowed_domain=journal.official_domain).decode(
             "utf-8", errors="replace"
         )
-        guidance = discover_official_guidance(journal.homepage_url, journal.official_domain, homepage)
+        try:
+            guidance = discover_official_guidance(journal.homepage_url, journal.official_domain, homepage)
+        except JournalResolutionError as initial_error:
+            links = re.findall(r"href=[\"']([^\"']+)[\"']", homepage, flags=re.I)
+            navigation: list[str] = []
+            for href in links:
+                candidate_url = urljoin(journal.homepage_url, href)
+                parsed = urlparse(candidate_url)
+                signal = f"{parsed.path} {parsed.query}".casefold()
+                if (
+                    parsed.scheme == "https"
+                    and (parsed.hostname or "").casefold() == journal.official_domain
+                    and any(marker in signal for marker in ("about", "scope", "author", "submit", "journal-info"))
+                ):
+                    navigation.append(candidate_url)
+            discovered_guidance: OfficialGuidance | None = None
+            for candidate_url in list(dict.fromkeys(navigation))[:12]:
+                try:
+                    page = client.get(candidate_url, allowed_domain=journal.official_domain).decode(
+                        "utf-8", errors="replace"
+                    )
+                    discovered_guidance = discover_official_guidance(candidate_url, journal.official_domain, page)
+                    break
+                except (HTTPException, JournalResolutionError):
+                    continue
+            if discovered_guidance is None:
+                raise initial_error
+            guidance = discovered_guidance
     except (json.JSONDecodeError, JournalResolutionError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from None
     return {
@@ -466,7 +504,6 @@ async def execute_project_workflow(
     report_progress("artifact-generation", 90)
     artifact_result = await generate_artifacts(str(analysis["id"]), principal, store)
     report_progress("artifact-generation", 98)
-    profiles.delete_snapshots(str(profile["id"]))
     store.delete_source_documents(principal, project_id)
     return {
         "state": "succeeded",
@@ -546,20 +583,25 @@ async def _research_journal(
         raise HTTPException(status_code=503, detail="Provider contact email is not configured")
     client = PoliteHttpClient(contact)
     official_domain = str(journal["officialDomain"])
-    scope_text, scope_access = _acquire_official_text(
-        client,
-        payload.scope_url,
-        official_domain,
-        payload.scope_snapshot,
-        payload.assisted_capture_confirmed,
-    )
-    guide_text, guide_access = _acquire_official_text(
-        client,
-        payload.guide_url,
-        official_domain,
-        payload.guide_snapshot,
-        payload.assisted_capture_confirmed,
-    )
+    repository = profile_repository(store)
+    repository.migrate()
+    previous = repository.current(str(journal["issn"]))
+    previous_snapshots = repository.official_snapshots(str(previous["id"])) if previous else []
+
+    def acquire_guidance(url: str, source_type: str, snapshot: str | None) -> tuple[str, str]:
+        try:
+            return _acquire_official_text(client, url, official_domain, snapshot, payload.assisted_capture_confirmed)
+        except HTTPException:
+            cached = next(
+                (item.get("content") for item in previous_snapshots if item.get("source_type") == source_type),
+                None,
+            )
+            if isinstance(cached, str) and len(cached.strip()) >= 500:
+                return cached, "cached-official"
+            raise
+
+    scope_text, scope_access = acquire_guidance(payload.scope_url, "official-scope", payload.scope_snapshot)
+    guide_text, guide_access = acquire_guidance(payload.guide_url, "official-guide", payload.guide_snapshot)
     evidence = [
         make_evidence(
             "official-scope",
@@ -645,10 +687,7 @@ async def _research_journal(
         )
     claims, derivation_limitations = derive_profile(evidence)
     limitations.extend(item for item in derivation_limitations if item not in limitations)
-    repository = profile_repository(store)
-    repository.migrate()
     if not limitations and os.getenv("GEMINI_API_KEY"):
-        previous = repository.current(str(journal["issn"]))
         memory_prompt, memory_source_ids = build_journal_memory_prompt(
             journal_title=str(journal["title"]),
             current_claims=(cast(list[dict[str, object]], previous["claims"]) if previous else []),
@@ -668,9 +707,19 @@ async def _research_journal(
             )
             warnings.extend(memory_result.response.limitations)
         except GeminiConfigurationError as error:
-            raise HTTPException(status_code=503, detail=str(error)) from None
+            print(
+                json.dumps({"event": "journal-memory.degraded", "reason": str(error), "provider": "gemini"}),
+                flush=True,
+            )
+            warnings.append("Journal-memory AI refinement was unavailable; deterministic evidence was retained.")
         except GeminiProviderError as error:
-            raise HTTPException(status_code=502, detail=str(error)) from None
+            print(
+                json.dumps({"event": "journal-memory.degraded", "reason": str(error), "provider": "gemini"}),
+                flush=True,
+            )
+            warnings.append(
+                "Journal-memory AI refinement was unavailable; deterministic evidence and prior memory were retained."
+            )
     result: dict[str, object] = {
         "status": "degraded" if limitations else "complete",
         "selectedArticles": [
@@ -915,6 +964,59 @@ async def create_ai_review(
     manuscript = store.manuscript_record(principal, str(analysis["projectId"]))
     profiles = profile_repository(store)
     profile = profiles.get(str(analysis["profileVersionId"]))
+    snapshots = profiles.official_snapshots(str(analysis["profileVersionId"]))
+    scope_text = next(
+        (item.get("content", "") for item in snapshots if item.get("source_type") == "official-scope"), ""
+    )
+    manuscript_text = str(manuscript.get("text", ""))
+    literature_context = extract_manuscript_literature_context(manuscript_text)
+    literature = manuscript_reference_evidence(literature_context)
+    review_limitations = list(literature_context.limitations)
+    base_url = os.getenv("RESEARCH_STARTER_BASE_URL")
+    research_key = os.getenv("RESEARCH_STARTER_API_KEY")
+    if base_url and research_key and literature_context.topic:
+        try:
+            research_result = ResearchStarterClient(base_url, research_key).report(
+                literature_context.topic, max_references=30, max_top_papers=20
+            )
+            literature.extend(
+                recent_literature_evidence(
+                    cast(list[dict[str, object]], research_result.references),
+                    cast(list[dict[str, object]], research_result.top_papers),
+                )
+            )
+            review_limitations.extend(research_result.warnings)
+        except HTTPException as error:
+            print(
+                json.dumps(
+                    {
+                        "event": "literature-search.degraded",
+                        "provider": "research-starter",
+                        "status": error.status_code,
+                    }
+                ),
+                flush=True,
+            )
+            review_limitations.append(
+                "The recent-literature search was unavailable; bibliography-based positioning remains provisional."
+            )
+    else:
+        review_limitations.append(
+            "The recent-literature search was not configured; bibliography-based positioning remains provisional."
+        )
+    labels = source_catalog(literature)
+    for snapshot in snapshots:
+        labels[str(snapshot.get("source_id", ""))] = (
+            "Official journal scope" if snapshot.get("source_type") == "official-scope" else "Official author guide"
+        )
+    for index, _text in enumerate(store.reference_texts(principal, str(analysis["projectId"])), 1):
+        labels[f"uploaded-reference-{index}"] = f"Uploaded reference article {index}"
+    for claim in cast(list[dict[str, object]], profile.get("claims", [])):
+        claim_source_ids = claim.get("sourceIds", [])
+        if not isinstance(claim_source_ids, list):
+            continue
+        for source_id in claim_source_ids:
+            labels.setdefault(str(source_id), str(claim.get("summary", source_id))[:1_000])
     prompt, allowed_source_ids = build_editorial_prompt(
         journal_title=str(cast(dict[str, object], project["journal"])["title"]),
         manuscript_segments=cast(list[dict[str, object]], manuscript["segments"]),
@@ -922,6 +1024,8 @@ async def create_ai_review(
         official_rules=cast(list[dict[str, object]], analysis["rules"]),
         deterministic_recommendations=cast(list[dict[str, object]], analysis["recommendations"]),
         reference_article_texts=store.reference_texts(principal, str(analysis["projectId"])),
+        official_scope_text=scope_text,
+        literature_evidence=literature,
     )
     try:
         client = GeminiEditorialClient()
@@ -935,12 +1039,25 @@ async def create_ai_review(
             result.response,
             profile_version_id=str(analysis["profileVersionId"]),
             allowed_source_ids=allowed_source_ids,
+            source_catalog=labels,
         )
     except GeminiConfigurationError as error:
-        raise HTTPException(status_code=503, detail=str(error)) from None
+        print(json.dumps({"event": "editorial-review.degraded", "reason": str(error)}), flush=True)
+        review_limitations.append(
+            "The AI-assisted scientific review was unavailable; the report contains deterministic checks only."
+        )
+        enriched = repository.add_ai_review(principal, analysis_id, [], review_limitations)
+        return enriched
     except GeminiProviderError as error:
-        raise HTTPException(status_code=502, detail=str(error)) from None
-    enriched = repository.add_ai_review(principal, analysis_id, recommendations, result.response.limitations)
+        print(json.dumps({"event": "editorial-review.degraded", "reason": str(error)}), flush=True)
+        review_limitations.append(
+            "The AI-assisted scientific review was unavailable; the report contains deterministic checks only."
+        )
+        enriched = repository.add_ai_review(principal, analysis_id, [], review_limitations)
+        return enriched
+    enriched = repository.add_ai_review(
+        principal, analysis_id, recommendations, [*result.response.limitations, *review_limitations]
+    )
     store.audit(
         principal,
         "analysis.ai-review.completed",

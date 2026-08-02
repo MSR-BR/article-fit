@@ -13,9 +13,6 @@ function completePackage() {
   fireEvent.change(screen.getByLabelText('Target journal'), {
     target: { value: 'Physical Review Letters' },
   });
-  fireEvent.change(screen.getByLabelText('Journal ISSN'), {
-    target: { value: '0031-9007' },
-  });
   fireEvent.change(screen.getByLabelText('Select articles'), {
     target: {
       files: [1, 2, 3].map(
@@ -35,18 +32,6 @@ function completePackage() {
       ],
     },
   });
-  fireEvent.change(screen.getByLabelText('Official Scope URL'), {
-    target: { value: 'https://journals.aps.org/prl/about' },
-  });
-  fireEvent.change(screen.getByLabelText('Official Guide for Authors URL'), {
-    target: { value: 'https://journals.aps.org/prl/authors' },
-  });
-  fireEvent.change(screen.getByLabelText('Scope page text'), {
-    target: { value: 'escopo oficial '.repeat(40) },
-  });
-  fireEvent.change(screen.getByLabelText('Guide for Authors text'), {
-    target: { value: 'orientação oficial '.repeat(40) },
-  });
 }
 
 describe('HomePage', () => {
@@ -60,7 +45,7 @@ describe('HomePage', () => {
     expect(screen.getByLabelText('Target journal')).toBeInTheDocument();
     expect(screen.queryByText(/Acesso ao Article Fit/)).not.toBeInTheDocument();
   });
-  it('shows the manuscript, references, and required official guidance', () => {
+  it('requires only the journal, manuscript, and reference articles', () => {
     render(<HomePage />);
 
     expect(
@@ -73,11 +58,14 @@ describe('HomePage', () => {
       'multiple',
     );
     expect(screen.getByLabelText('Target journal')).toBeRequired();
-    expect(screen.getByLabelText('Journal ISSN')).toBeRequired();
-    expect(screen.getByLabelText('Official Scope URL')).toBeRequired();
+    expect(screen.getByLabelText('Journal ISSN')).not.toBeRequired();
+    expect(screen.getByLabelText('Official Scope URL')).not.toBeRequired();
     expect(
       screen.getByLabelText('Official Guide for Authors URL'),
-    ).toBeRequired();
+    ).not.toBeRequired();
+    expect(
+      screen.getByText('Only if automatic journal lookup fails'),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Start analysis' }),
     ).toBeDisabled();
@@ -136,13 +124,8 @@ describe('HomePage', () => {
       }),
     ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(6);
-    expect(
-      JSON.parse(String(fetchMock.mock.calls[5]?.[1]?.body)),
-    ).toMatchObject({
-      journalTitle: 'Physical Review Letters',
-      journalIssn: '0031-9007',
-      scopeUrl: 'https://journals.aps.org/prl/about',
-      guideUrl: 'https://journals.aps.org/prl/authors',
+    expect(JSON.parse(String(fetchMock.mock.calls[5]?.[1]?.body))).toEqual({
+      idempotencyKey: expect.any(String),
     });
   });
 
@@ -539,23 +522,59 @@ describe('HomePage', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('requires a complete official-guidance package', () => {
+  it('requires a complete optional recovery package only when one field is used', () => {
     render(<HomePage />);
     completePackage();
-    fireEvent.change(screen.getByLabelText('Guide for Authors text'), {
-      target: { value: '' },
+    fireEvent.change(screen.getByLabelText('Journal ISSN'), {
+      target: { value: '0031-9007' },
     });
     expect(
       screen.getByRole('button', { name: 'Start analysis' }),
     ).toBeDisabled();
     expect(screen.getByRole('status')).toHaveTextContent(
-      'Complete the Scope and Guide for Authors',
+      'Complete all optional recovery fields',
     );
-    fireEvent.change(screen.getByLabelText('Guide for Authors text'), {
-      target: { value: 'orientação oficial '.repeat(40) },
+    fireEvent.change(screen.getByLabelText('Official Scope URL'), {
+      target: { value: 'https://journals.aps.org/prl/about' },
+    });
+    fireEvent.change(screen.getByLabelText('Official Guide for Authors URL'), {
+      target: { value: 'https://journals.aps.org/prl/authors' },
     });
     expect(
       screen.getByRole('button', { name: 'Start analysis' }),
     ).toBeEnabled();
+  });
+
+  it('sends optional verified identity only when manual recovery is complete', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ id: 'project-manual' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'reference-1' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'reference-2' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'reference-3' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'manuscript' }))
+      .mockResolvedValueOnce(
+        jsonResponse({ analysisId: 'analysis-manual', artifacts: [] }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    render(<HomePage />);
+    completePackage();
+    fireEvent.change(screen.getByLabelText('Journal ISSN'), {
+      target: { value: '0031-9007' },
+    });
+    fireEvent.change(screen.getByLabelText('Official Scope URL'), {
+      target: { value: 'https://journals.aps.org/prl/about' },
+    });
+    fireEvent.change(screen.getByLabelText('Official Guide for Authors URL'), {
+      target: { value: 'https://journals.aps.org/prl/authors' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Start analysis' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6));
+    expect(JSON.parse(String(fetchMock.mock.calls[5]?.[1]?.body))).toMatchObject({
+      journalTitle: 'Physical Review Letters',
+      journalIssn: '0031-9007',
+      scopeUrl: 'https://journals.aps.org/prl/about',
+      guideUrl: 'https://journals.aps.org/prl/authors',
+    });
   });
 });

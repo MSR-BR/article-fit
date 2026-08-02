@@ -107,6 +107,62 @@ def test_retries_transient_provider_failure(monkeypatch: pytest.MonkeyPatch) -> 
     assert calls == 3
 
 
+def test_retries_without_provider_schema_after_schema_rejection(monkeypatch: pytest.MonkeyPatch) -> None:
+    requests: list[object] = []
+
+    def reject_schema(request: object, **_kwargs: object) -> FakeResponse:
+        requests.append(request)
+        body = json.loads(request.data)  # type: ignore[union-attr]
+        if "responseJsonSchema" in body["generationConfig"]:
+            provider_body = BytesIO(json.dumps({"error": {"message": "Schema is too complex"}}).encode())
+            raise HTTPError("https://provider", 400, "invalid", {}, provider_body)
+        return FakeResponse(editorial())
+
+    monkeypatch.setattr("journal_matcher_api.gemini.urlopen", reject_schema)
+
+    result = GeminiEditorialClient(api_key="secret", model="test-model").generate("Prompt")
+
+    assert result.model == "test-model"
+    assert len(requests) == 2
+    fallback_body = json.loads(requests[1].data)  # type: ignore[union-attr]
+    assert "responseJsonSchema" not in fallback_body["generationConfig"]
+    assert "OUTPUT_SCHEMA_JSON" in fallback_body["contents"][0]["parts"][0]["text"]
+
+
+def test_uses_fallback_model_when_primary_rejects_all_modes(monkeypatch: pytest.MonkeyPatch) -> None:
+    urls: list[str] = []
+
+    def primary_fails(request: object, **_kwargs: object) -> FakeResponse:
+        urls.append(request.full_url)  # type: ignore[union-attr]
+        if "primary-model" in request.full_url:  # type: ignore[union-attr]
+            raise HTTPError("https://provider", 400, "invalid", {}, BytesIO(b"{}"))
+        return FakeResponse(editorial())
+
+    monkeypatch.setenv("GEMINI_FALLBACK_MODEL", "fallback-model")
+    monkeypatch.setattr("journal_matcher_api.gemini.urlopen", primary_fails)
+
+    result = GeminiEditorialClient(api_key="secret", model="primary-model").generate("Prompt")
+
+    assert result.model == "fallback-model"
+    assert any("primary-model" in url for url in urls)
+    assert any("fallback-model" in url for url in urls)
+
+
+def test_rejects_empty_prompt_and_non_stop_generation(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = GeminiEditorialClient(api_key="secret")
+    with pytest.raises(ValueError, match="cannot be empty"):
+        client.generate("   ")
+
+    class TruncatedResponse(FakeResponse):
+        def __init__(self) -> None:
+            payload = {"candidates": [{"finishReason": "MAX_TOKENS", "content": {"parts": [{"text": "{}"}]}}]}
+            self.stream = BytesIO(json.dumps(payload).encode())
+
+    monkeypatch.setattr("journal_matcher_api.gemini.urlopen", lambda *_a, **_k: TruncatedResponse())
+    with pytest.raises(GeminiProviderError, match="MAX_TOKENS"):
+        client.generate("Prompt")
+
+
 def test_rejects_unsafe_scientific_change(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "journal_matcher_api.gemini.urlopen", lambda *_a, **_k: FakeResponse(editorial(scientific=True))
@@ -166,6 +222,9 @@ def test_rejects_superficial_review_and_accepts_complete_coverage() -> None:
         validate_scientific_coverage(response)
     dimensions = [
         "scientific-framing",
+        "scope-fit",
+        "literature-positioning",
+        "novelty-significance",
         "theory-methodology",
         "validation-robustness",
         "results-analysis",
@@ -177,6 +236,7 @@ def test_rejects_superficial_review_and_accepts_complete_coverage() -> None:
         "validation-robustness",
         "results-analysis",
         "structure",
+        "writing",
     ]
     complete = editorial()
     template = complete["proposals"][0]
@@ -218,6 +278,16 @@ def test_analyzes_structured_feedback(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert result.response.actionable is True
     assert result.response.category == "scientific-depth"
+
+
+def test_rejects_invalid_feedback_and_memory_payloads(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = GeminiEditorialClient(api_key="secret")
+    monkeypatch.setattr(client, "_generate_json", lambda *_a, **_k: ("test-model", {}))
+
+    with pytest.raises(GeminiProviderError, match="invalid feedback"):
+        client.analyze_feedback("Prompt")
+    with pytest.raises(GeminiProviderError, match="invalid journal-memory"):
+        client.synthesize_memory("Prompt")
 
 
 def test_synthesizes_evidence_bounded_journal_memory(monkeypatch: pytest.MonkeyPatch) -> None:

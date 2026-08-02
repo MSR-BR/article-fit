@@ -76,8 +76,6 @@ type RunContext = {
 const emptyGuidance = {
   scopeUrl: '',
   guideUrl: '',
-  scopeSnapshot: '',
-  guideSnapshot: '',
 };
 
 type JobStatus = {
@@ -117,7 +115,7 @@ function sameOfficialDomain(scopeUrl: string, guideUrl: string) {
 function workflowError(job: JobStatus) {
   const code = job.errorCode ?? 'workflow-failed';
   return code.includes('502')
-    ? 'A required service could not be reached. Wait a few minutes and try again. If the problem continues, check the ISSN and official pages.'
+    ? 'Automatic journal lookup could not be completed. Wait a few minutes and try again. If it repeats, open “Only if automatic journal lookup fails” and provide the ISSN and official pages.'
     : code.includes('503')
       ? 'The service is temporarily unavailable. Wait a few minutes and try again.'
       : code.includes('422')
@@ -198,24 +196,21 @@ export default function HomePage() {
     ? 'The server is still processing. Reconnecting to receive the latest confirmed status.'
     : (progressStages[activeStep]?.message ?? '');
 
-  const assistedValues = Object.values(guidance).map((value) => value.trim());
+  const manualValues = Object.values(guidance).map((value) => value.trim());
+  const manualRequested = Boolean(journalIssn.trim() || manualValues.some(Boolean));
   const officialUrlsReady = sameOfficialDomain(
     guidance.scopeUrl.trim(),
     guidance.guideUrl.trim(),
   );
-  const assistedReady =
-    assistedValues.every(Boolean) &&
-    officialUrlsReady &&
-    guidance.scopeSnapshot.trim().length >= 500 &&
-    guidance.guideSnapshot.trim().length >= 500;
+  const assistedReady = manualValues.every(Boolean) && officialUrlsReady;
   const issnReady = /^\d{4}-\d{3}[\dXx]$/.test(journalIssn.trim());
+  const manualReady = !manualRequested || (assistedReady && issnReady);
 
   const ready =
     journal.trim().length >= 2 &&
-    issnReady &&
     uploads.references.length >= 3 &&
     uploads.manuscript !== null &&
-    assistedReady;
+    manualReady;
   const status = useMemo(() => {
     if (ready) {
       return started
@@ -223,9 +218,8 @@ export default function HomePage() {
         : 'Files are ready for analysis.';
     }
     if (!journal.trim()) return 'Enter the target journal to begin.';
-    if (!issnReady) return 'Enter the journal ISSN in the format 1234-567X.';
-    if (!assistedReady) {
-      return 'Complete the Scope and Guide for Authors using HTTPS URLs from the same official domain.';
+    if (manualRequested && !manualReady) {
+      return 'Complete all optional recovery fields, or clear them to use automatic discovery.';
     }
     if (uploads.references.length > 0 && uploads.references.length < 3) {
       return `Add at least ${3 - uploads.references.length} more reference article${uploads.references.length === 2 ? '' : 's'}.`;
@@ -237,7 +231,7 @@ export default function HomePage() {
       return 'Now upload at least three articles published in the target journal.';
     }
     return 'Upload both sets of files to begin.';
-  }, [assistedReady, issnReady, journal, ready, started, uploads]);
+  }, [journal, manualReady, manualRequested, ready, started, uploads]);
 
   async function startAnalysis() {
     if (!ready || !uploads.manuscript) return;
@@ -302,9 +296,13 @@ export default function HomePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           idempotencyKey: crypto.randomUUID(),
-          journalTitle: journal.trim(),
-          journalIssn: journalIssn.trim().toUpperCase(),
-          ...guidance,
+          ...(manualRequested && manualReady
+            ? {
+                journalTitle: journal.trim(),
+                journalIssn: journalIssn.trim().toUpperCase(),
+                ...guidance,
+              }
+            : {}),
         }),
       });
       let workflow = initiated;
@@ -525,19 +523,9 @@ export default function HomePage() {
             autoComplete="organization"
             required
           />
-          <small>Enter the journal&apos;s full name.</small>
-          <label htmlFor="target-journal-issn">Journal ISSN</label>
-          <input
-            id="target-journal-issn"
-            type="text"
-            value={journalIssn}
-            onChange={(event) => setJournalIssn(event.currentTarget.value)}
-            placeholder="e.g. 0031-9007"
-            inputMode="text"
-            required
-          />
           <small>
-            The ISSN prevents unnecessary journal-identification requests.
+            Enter the journal&apos;s full name. Article Fit will find its ISSN,
+            Scope, and Guide for Authors.
           </small>
         </div>
 
@@ -601,22 +589,22 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section
-        className="assisted-guidance"
-        aria-labelledby="official-guidance-title"
-      >
-        <div className="upload-copy">
-          <span className="step">03</span>
-          <div>
-            <h2 id="official-guidance-title">Official guidance</h2>
-            <p>Scope and Guide for Authors are required.</p>
-          </div>
-        </div>
+      <details className="assisted-guidance">
+        <summary>Only if automatic journal lookup fails</summary>
         <p>
-          Enter the official pages and paste the visible text from each one.
-          This reduces publisher blocking and speeds up the analysis.
+          Normally, leave this closed. If Article Fit asks for help, provide
+          the ISSN and both official pages; no copied page text is required.
         </p>
         <div className="assisted-grid">
+          <label>
+            Journal ISSN
+            <input
+              type="text"
+              value={journalIssn}
+              onChange={(event) => setJournalIssn(event.currentTarget.value)}
+              placeholder="e.g. 0031-9007"
+            />
+          </label>
           <label>
             Official Scope URL
             <input
@@ -624,10 +612,12 @@ export default function HomePage() {
               value={guidance.scopeUrl}
               onChange={(event) => {
                 const value = event.currentTarget.value;
-                setGuidance((current) => ({ ...current, scopeUrl: value }));
+                setGuidance((current) => ({
+                  ...current,
+                  scopeUrl: value,
+                }));
               }}
               placeholder="https://publisher.example/journal/scope"
-              required
             />
           </label>
           <label>
@@ -637,51 +627,22 @@ export default function HomePage() {
               value={guidance.guideUrl}
               onChange={(event) => {
                 const value = event.currentTarget.value;
-                setGuidance((current) => ({ ...current, guideUrl: value }));
+                setGuidance((current) => ({
+                  ...current,
+                  guideUrl: value,
+                }));
               }}
               placeholder="https://publisher.example/journal/authors"
-              required
-            />
-          </label>
-          <label>
-            Scope page text
-            <textarea
-              value={guidance.scopeSnapshot}
-              onChange={(event) => {
-                const value = event.currentTarget.value;
-                setGuidance((current) => ({
-                  ...current,
-                  scopeSnapshot: value,
-                }));
-              }}
-              minLength={500}
-              required
-              placeholder="Paste at least 500 characters from the official page."
-            />
-          </label>
-          <label>
-            Guide for Authors text
-            <textarea
-              value={guidance.guideSnapshot}
-              onChange={(event) => {
-                const value = event.currentTarget.value;
-                setGuidance((current) => ({
-                  ...current,
-                  guideSnapshot: value,
-                }));
-              }}
-              minLength={500}
-              required
-              placeholder="Paste at least 500 characters from the official page."
             />
           </label>
         </div>
-        {!assistedReady && (
+        {manualRequested && !manualReady && (
           <small className="file-limit-notice">
-            Provide both URLs and at least 500 characters from each page.
+            Complete all three fields, using official HTTPS pages from the
+            same publisher domain, or clear them to return to automatic lookup.
           </small>
         )}
-      </section>
+      </details>
 
       <p className={`status ${ready ? 'ready' : ''}`} role="status">
         <span aria-hidden="true" />
