@@ -13,6 +13,9 @@ function completePackage() {
   fireEvent.change(screen.getByLabelText('Revista-alvo'), {
     target: { value: 'Physical Review Letters' },
   });
+  fireEvent.change(screen.getByLabelText('ISSN da revista'), {
+    target: { value: '0031-9007' },
+  });
   fireEvent.change(screen.getByLabelText('Selecionar artigos'), {
     target: {
       files: [1, 2, 3].map(
@@ -32,6 +35,18 @@ function completePackage() {
       ],
     },
   });
+  fireEvent.change(screen.getByLabelText('URL oficial do escopo'), {
+    target: { value: 'https://journals.aps.org/prl/about' },
+  });
+  fireEvent.change(screen.getByLabelText('URL oficial do guia dos autores'), {
+    target: { value: 'https://journals.aps.org/prl/authors' },
+  });
+  fireEvent.change(screen.getByLabelText('Texto da página de escopo'), {
+    target: { value: 'escopo oficial '.repeat(40) },
+  });
+  fireEvent.change(screen.getByLabelText('Texto do guia dos autores'), {
+    target: { value: 'orientação oficial '.repeat(40) },
+  });
 }
 
 describe('HomePage', () => {
@@ -45,7 +60,7 @@ describe('HomePage', () => {
     expect(screen.getByLabelText('Revista-alvo')).toBeInTheDocument();
     expect(screen.queryByText(/Acesso ao Article Fit/)).not.toBeInTheDocument();
   });
-  it('shows only the two document inputs and the concise explanation', () => {
+  it('shows the manuscript, references, and required official guidance', () => {
     render(<HomePage />);
 
     expect(
@@ -58,6 +73,11 @@ describe('HomePage', () => {
       'multiple',
     );
     expect(screen.getByLabelText('Revista-alvo')).toBeRequired();
+    expect(screen.getByLabelText('ISSN da revista')).toBeRequired();
+    expect(screen.getByLabelText('URL oficial do escopo')).toBeRequired();
+    expect(
+      screen.getByLabelText('URL oficial do guia dos autores'),
+    ).toBeRequired();
     expect(
       screen.getByRole('button', { name: 'Iniciar análise' }),
     ).toBeDisabled();
@@ -120,6 +140,14 @@ describe('HomePage', () => {
       screen.getByRole('link', { name: /Artigo revisado \(Word\)/ }),
     ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect(
+      JSON.parse(String(fetchMock.mock.calls[5]?.[1]?.body)),
+    ).toMatchObject({
+      journalTitle: 'Physical Review Letters',
+      journalIssn: '0031-9007',
+      scopeUrl: 'https://journals.aps.org/prl/about',
+      guideUrl: 'https://journals.aps.org/prl/authors',
+    });
   });
 
   it('uses the latest analysis id after an asynchronous job succeeds', async () => {
@@ -196,12 +224,10 @@ describe('HomePage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Iniciar análise' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'serviço externo de pesquisa ou de inteligência artificial',
+      'Aguarde alguns minutos e tente novamente',
     );
-    expect(screen.getByRole('alert')).toHaveTextContent('workflow-502');
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      'O provedor de IA não respondeu dentro do limite.',
-    );
+    expect(screen.getByRole('alert')).not.toHaveTextContent('workflow-502');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('provedor de IA');
     expect(
       screen.getByRole('dialog', { name: 'Análise interrompida' }),
     ).toBeInTheDocument();
@@ -230,11 +256,97 @@ describe('HomePage', () => {
     );
   });
 
+  it('never moves progress backwards when a queued job still reports zero', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ id: 'project-monotonic' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'reference-1' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'reference-2' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'reference-3' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'manuscript' }))
+      .mockResolvedValueOnce(
+        jsonResponse({ id: 'job-monotonic', state: 'queued' }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          state: 'queued',
+          stage: 'awaiting-worker',
+          progress: 0,
+          errorCode: null,
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    render(<HomePage />);
+    completePackage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Iniciar análise' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(7));
+    expect(screen.getByRole('progressbar')).toHaveAttribute(
+      'aria-valuenow',
+      '25',
+    );
+    expect(
+      screen.getByText(/Progresso geral: aproximadamente 25%/),
+    ).toBeInTheDocument();
+  });
+
+  it('cancels a created job and stops the visible analysis', async () => {
+    const pendingJob = new Promise<Response>(() => {});
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ id: 'project-stop' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'reference-1' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'reference-2' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'reference-3' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'manuscript' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'job-stop', state: 'queued' }))
+      .mockImplementationOnce(() => pendingJob)
+      .mockResolvedValueOnce(
+        jsonResponse({ state: 'cancelled', stage: 'cancelled', progress: 25 }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    render(<HomePage />);
+    completePackage();
+    fireEvent.click(screen.getByRole('button', { name: 'Iniciar análise' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(7));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Parar análise' }));
+
+    expect(
+      await screen.findByRole('dialog', { name: 'Análise interrompida' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Nenhum arquivo final foi gerado/),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/journal-matcher/jobs/job-stop/cancel',
+        expect.objectContaining({ method: 'POST' }),
+      ),
+    );
+    expect(document.querySelector('.spinner')).toBeNull();
+  });
+
+  it('clears every field and allows the same files to be selected again', () => {
+    render(<HomePage />);
+    completePackage();
+    expect(screen.getByText('referencia-1.pdf')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Limpar campos' }));
+
+    expect(screen.getByLabelText('Revista-alvo')).toHaveValue('');
+    expect(screen.getByLabelText('ISSN da revista')).toHaveValue('');
+    expect(screen.getByLabelText('URL oficial do escopo')).toHaveValue('');
+    expect(screen.queryByText('referencia-1.pdf')).toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Iniciar análise' }),
+    ).toBeDisabled();
+  });
+
   it('asks for the remaining orientation articles', () => {
     render(<HomePage />);
-    fireEvent.change(screen.getByLabelText('Revista-alvo'), {
-      target: { value: 'Physical Review Letters' },
-    });
+    completePackage();
     fireEvent.change(screen.getByLabelText('Selecionar artigos'), {
       target: {
         files: [
@@ -314,7 +426,7 @@ describe('HomePage', () => {
     completePackage();
     fireEvent.click(screen.getByRole('button', { name: 'Iniciar análise' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Não foi possível confirmar a revista.',
+      'Revise os campos e os arquivos enviados',
     );
     expect(
       screen.getByRole('button', { name: 'Iniciar análise' }),
@@ -324,22 +436,18 @@ describe('HomePage', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('requires a complete assisted official-guidance package', () => {
+  it('requires a complete official-guidance package', () => {
     render(<HomePage />);
     completePackage();
-    fireEvent.change(screen.getByLabelText('URL oficial do escopo'), {
-      target: { value: 'https://journals.aps.org/prl/about' },
+    fireEvent.change(screen.getByLabelText('Texto do guia dos autores'), {
+      target: { value: '' },
     });
     expect(
       screen.getByRole('button', { name: 'Iniciar análise' }),
     ).toBeDisabled();
-    expect(screen.getByRole('status')).toHaveTextContent('Complete o pacote');
-    fireEvent.change(screen.getByLabelText('URL oficial do guia dos autores'), {
-      target: { value: 'https://journals.aps.org/prl/authors' },
-    });
-    fireEvent.change(screen.getByLabelText('Texto da página de escopo'), {
-      target: { value: 'escopo oficial '.repeat(40) },
-    });
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Complete o Scope e o Guide for Authors',
+    );
     fireEvent.change(screen.getByLabelText('Texto do guia dos autores'), {
       target: { value: 'orientação oficial '.repeat(40) },
     });

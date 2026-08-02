@@ -1,6 +1,6 @@
 'use client';
 
-import { ChangeEvent, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 type UploadState = {
   references: File[];
@@ -78,7 +78,20 @@ const progressStages = [
   },
 ] as const;
 
-type RunState = 'idle' | 'running' | 'succeeded' | 'failed';
+type RunState = 'idle' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+
+type RunContext = {
+  controller: AbortController;
+  projectId?: string;
+  jobId?: string;
+};
+
+const emptyGuidance = {
+  scopeUrl: '',
+  guideUrl: '',
+  scopeSnapshot: '',
+  guideSnapshot: '',
+};
 
 type JobStatus = {
   state: string;
@@ -106,24 +119,42 @@ function stagePercentage(
   );
 }
 
+function sameOfficialDomain(scopeUrl: string, guideUrl: string) {
+  try {
+    const scope = new URL(scopeUrl);
+    const guide = new URL(guideUrl);
+    return (
+      scope.protocol === 'https:' &&
+      guide.protocol === 'https:' &&
+      scope.hostname.toLowerCase() === guide.hostname.toLowerCase()
+    );
+  } catch {
+    return false;
+  }
+}
+
 function workflowError(job: JobStatus) {
   const code = job.errorCode ?? 'workflow-failed';
-  const stage =
-    progressStages[stageIndex(job.progress, job.stage)]?.label.toLowerCase() ??
-    'processamento';
-  const explanation = code.includes('502')
-    ? 'Um serviço externo de pesquisa ou de inteligência artificial respondeu com um erro temporário.'
+  return code.includes('502')
+    ? 'Não foi possível acessar um serviço necessário. Aguarde alguns minutos e tente novamente. Se o problema continuar, confira o ISSN e as páginas oficiais informadas.'
     : code.includes('503')
-      ? 'Um serviço necessário estava temporariamente indisponível.'
+      ? 'O serviço está temporariamente indisponível. Aguarde alguns minutos e tente novamente.'
       : code.includes('422')
-        ? 'O conteúdo recebido não pôde ser validado com segurança.'
+        ? 'Revise os campos e os arquivos enviados. Um deles não pôde ser validado com segurança.'
         : code.includes('409')
-          ? 'Faltaram dados ou evidências necessários para continuar com segurança.'
-          : 'O processamento foi interrompido antes da geração dos arquivos.';
-  const detail = job.errorDetail?.trim()
-    ? ` Motivo informado pelo servidor: ${job.errorDetail.trim()}`
-    : '';
-  return `${explanation}${detail} Etapa: ${stage}. Erro técnico: ${code}.`;
+          ? 'Confira se todos os campos obrigatórios e documentos foram enviados e tente novamente.'
+          : 'Não foi possível concluir a análise. Confira os campos e arquivos e tente novamente em alguns minutos.';
+}
+
+function requestError(status: number) {
+  if (status === 413) return 'Um dos arquivos excede o limite de 25 MB.';
+  if (status === 415)
+    return 'Um dos arquivos está em formato incompatível. Use PDF nos artigos de orientação e PDF ou Word no manuscrito.';
+  if (status === 422)
+    return 'Revise os campos e os arquivos enviados. Um deles não pôde ser validado.';
+  if (status === 409)
+    return 'Confira se todos os campos obrigatórios e documentos foram enviados e tente novamente.';
+  return 'Não foi possível continuar agora. Aguarde alguns minutos e tente novamente.';
 }
 
 const artifactLabels: Record<string, string> = {
@@ -136,12 +167,7 @@ const artifactLabels: Record<string, string> = {
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/journal-matcher${path}`, init);
   if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
-    const detail =
-      typeof payload.detail === 'string'
-        ? payload.detail
-        : payload.detail?.message;
-    throw new Error(detail || `A operação falhou (${response.status}).`);
+    throw new Error(requestError(response.status));
   }
   return response.json() as Promise<T>;
 }
@@ -168,6 +194,7 @@ export default function HomePage() {
   });
   const [started, setStarted] = useState(false);
   const [journal, setJournal] = useState('');
+  const [journalIssn, setJournalIssn] = useState('');
   const [showProgress, setShowProgress] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
   const [overallProgress, setOverallProgress] = useState(0);
@@ -176,12 +203,10 @@ export default function HomePage() {
   const [error, setError] = useState('');
   const [analysisId, setAnalysisId] = useState('');
   const [artifacts, setArtifacts] = useState<string[]>([]);
-  const [guidance, setGuidance] = useState({
-    scopeUrl: '',
-    guideUrl: '',
-    scopeSnapshot: '',
-    guideSnapshot: '',
-  });
+  const [guidance, setGuidance] = useState(emptyGuidance);
+  const [inputVersion, setInputVersion] = useState(0);
+  const runContext = useRef<RunContext | null>(null);
+  const stopRequested = useRef(false);
 
   const activeMessages = progressStages[activeStep]?.messages ?? [];
   const activityMessage =
@@ -196,27 +221,34 @@ export default function HomePage() {
   }, [activeStep, activeMessages.length, runState]);
 
   const assistedValues = Object.values(guidance).map((value) => value.trim());
-  const assistedStarted = assistedValues.some(Boolean);
+  const officialUrlsReady = sameOfficialDomain(
+    guidance.scopeUrl.trim(),
+    guidance.guideUrl.trim(),
+  );
   const assistedReady =
     assistedValues.every(Boolean) &&
+    officialUrlsReady &&
     guidance.scopeSnapshot.trim().length >= 500 &&
     guidance.guideSnapshot.trim().length >= 500;
+  const issnReady = /^\d{4}-\d{3}[\dXx]$/.test(journalIssn.trim());
 
   const ready =
     journal.trim().length >= 2 &&
+    issnReady &&
     uploads.references.length >= 3 &&
     uploads.manuscript !== null &&
-    (!assistedStarted || assistedReady);
+    assistedReady;
   const status = useMemo(() => {
-    if (assistedStarted && !assistedReady) {
-      return 'Complete o pacote de orientação oficial assistida para iniciar.';
-    }
     if (ready) {
       return started
         ? `Análise iniciada para ${journal.trim()}.`
         : 'Arquivos prontos para análise.';
     }
     if (!journal.trim()) return 'Informe a revista-alvo para iniciar.';
+    if (!issnReady) return 'Informe o ISSN da revista no formato 1234-567X.';
+    if (!assistedReady) {
+      return 'Complete o Scope e o Guide for Authors com URLs HTTPS do mesmo domínio oficial.';
+    }
     if (uploads.references.length > 0 && uploads.references.length < 3) {
       return `Adicione pelo menos mais ${3 - uploads.references.length} artigo${uploads.references.length === 2 ? '' : 's'} de orientação.`;
     }
@@ -227,10 +259,13 @@ export default function HomePage() {
       return 'Agora envie pelo menos três artigos publicados na revista pretendida.';
     }
     return 'Envie os dois conjuntos de arquivos para iniciar.';
-  }, [assistedReady, assistedStarted, journal, ready, started, uploads]);
+  }, [assistedReady, issnReady, journal, ready, started, uploads]);
 
   async function startAnalysis() {
     if (!ready || !uploads.manuscript) return;
+    const context: RunContext = { controller: new AbortController() };
+    runContext.current = context;
+    stopRequested.current = false;
     setActiveStep(0);
     setOverallProgress(2);
     setRunState('running');
@@ -241,9 +276,11 @@ export default function HomePage() {
     try {
       const project = await api<{ id: string }>('/projects', {
         method: 'POST',
+        signal: context.controller.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ journalCandidate: journal.trim() }),
       });
+      context.projectId = project.id;
       setActiveStep(1);
       setOverallProgress(8);
       const documents = [
@@ -257,6 +294,7 @@ export default function HomePage() {
           `/projects/${project.id}/documents/${slot}?filename=${encodeURIComponent(file.name)}`,
           {
             method: 'PUT',
+            signal: context.controller.signal,
             headers: {
               'Content-Type': 'application/octet-stream',
               'X-Document-Media-Type': file.type,
@@ -279,18 +317,26 @@ export default function HomePage() {
         errorCode?: string | null;
       }>(`/projects/${project.id}/run`, {
         method: 'POST',
+        signal: context.controller.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           idempotencyKey: crypto.randomUUID(),
-          ...(assistedReady ? guidance : {}),
+          journalTitle: journal.trim(),
+          journalIssn: journalIssn.trim().toUpperCase(),
+          ...guidance,
         }),
       });
       let workflow = initiated;
       if (!workflow.analysisId && workflow.id) {
+        context.jobId = workflow.id;
         for (let attempt = 0; attempt < 300; attempt += 1) {
-          const job = await api<JobStatus>(`/jobs/${workflow.id}`);
-          setOverallProgress(job.progress);
-          setActiveStep(stageIndex(job.progress, job.stage));
+          const job = await api<JobStatus>(`/jobs/${workflow.id}`, {
+            signal: context.controller.signal,
+          });
+          setOverallProgress((current) => Math.max(current, job.progress));
+          setActiveStep((current) =>
+            Math.max(current, stageIndex(job.progress, job.stage)),
+          );
           if (job.state === 'failed' || job.state === 'cancelled') {
             throw new Error(workflowError(job));
           }
@@ -298,7 +344,9 @@ export default function HomePage() {
             const latest = await api<{
               id: string;
               artifacts: Array<{ kind: string }>;
-            }>(`/projects/${project.id}/latest-analysis`);
+            }>(`/projects/${project.id}/latest-analysis`, {
+              signal: context.controller.signal,
+            });
             workflow = {
               analysisId: latest.id,
               artifacts: latest.artifacts,
@@ -320,6 +368,7 @@ export default function HomePage() {
       setRunState('succeeded');
       setStarted(false);
     } catch (caught) {
+      if (stopRequested.current) return;
       setError(
         caught instanceof Error
           ? caught.message
@@ -327,7 +376,50 @@ export default function HomePage() {
       );
       setRunState('failed');
       setStarted(false);
+    } finally {
+      if (runContext.current === context) runContext.current = null;
     }
+  }
+
+  async function stopAnalysis() {
+    if (runState !== 'running') return;
+    stopRequested.current = true;
+    const context = runContext.current;
+    context?.controller.abort();
+    setRunState('cancelled');
+    setStarted(false);
+    setError('');
+    try {
+      if (context?.jobId) {
+        await api(`/jobs/${context.jobId}/cancel`, { method: 'POST' });
+      } else if (context?.projectId) {
+        await fetch(`/api/journal-matcher/projects/${context.projectId}`, {
+          method: 'DELETE',
+        });
+      }
+    } catch {
+      setError(
+        'A análise parou nesta tela. Os dados temporários restantes serão eliminados automaticamente.',
+      );
+    }
+  }
+
+  function resetForm() {
+    if (runState === 'running') return;
+    setUploads({ references: [], manuscript: null });
+    setJournal('');
+    setJournalIssn('');
+    setGuidance(emptyGuidance);
+    setStarted(false);
+    setShowProgress(false);
+    setActiveStep(0);
+    setOverallProgress(0);
+    setRunState('idle');
+    setActivityIndex(0);
+    setError('');
+    setAnalysisId('');
+    setArtifacts([]);
+    setInputVersion((current) => current + 1);
   }
 
   function hideProgress() {
@@ -384,7 +476,20 @@ export default function HomePage() {
             autoComplete="organization"
             required
           />
-          <small>Informe o título, ISSN ou endereço oficial da revista.</small>
+          <small>Informe o nome completo da revista.</small>
+          <label htmlFor="target-journal-issn">ISSN da revista</label>
+          <input
+            id="target-journal-issn"
+            type="text"
+            value={journalIssn}
+            onChange={(event) => setJournalIssn(event.currentTarget.value)}
+            placeholder="Ex.: 0031-9007"
+            inputMode="text"
+            required
+          />
+          <small>
+            O ISSN evita consultas desnecessárias para identificar a revista.
+          </small>
         </div>
 
         <div className="divider" aria-hidden="true" />
@@ -401,6 +506,7 @@ export default function HomePage() {
             Selecionar artigos
           </label>
           <input
+            key={`references-${inputVersion}`}
             id="reference-files"
             className="visually-hidden"
             type="file"
@@ -431,6 +537,7 @@ export default function HomePage() {
             Selecionar manuscrito
           </label>
           <input
+            key={`manuscript-${inputVersion}`}
             id="manuscript-file"
             className="visually-hidden"
             type="file"
@@ -441,11 +548,20 @@ export default function HomePage() {
         </div>
       </section>
 
-      <details className="assisted-guidance">
-        <summary>A editora bloqueia a consulta automática?</summary>
+      <section
+        className="assisted-guidance"
+        aria-labelledby="official-guidance-title"
+      >
+        <div className="upload-copy">
+          <span className="step">03</span>
+          <div>
+            <h2 id="official-guidance-title">Orientação oficial</h2>
+            <p>Scope e Guide for Authors são obrigatórios.</p>
+          </div>
+        </div>
         <p>
-          Informe as páginas oficiais e cole o texto visível delas. Use somente
-          quando o aplicativo indicar bloqueio.
+          Informe as páginas oficiais e cole o texto visível de cada uma. Isso
+          reduz bloqueios das editoras e acelera a análise.
         </p>
         <div className="assisted-grid">
           <label>
@@ -458,6 +574,7 @@ export default function HomePage() {
                 setGuidance((current) => ({ ...current, scopeUrl: value }));
               }}
               placeholder="https://editora.example/revista/scope"
+              required
             />
           </label>
           <label>
@@ -470,6 +587,7 @@ export default function HomePage() {
                 setGuidance((current) => ({ ...current, guideUrl: value }));
               }}
               placeholder="https://editora.example/revista/authors"
+              required
             />
           </label>
           <label>
@@ -484,6 +602,8 @@ export default function HomePage() {
                 }));
               }}
               minLength={500}
+              required
+              placeholder="Cole ao menos 500 caracteres da página oficial."
             />
           </label>
           <label>
@@ -498,29 +618,41 @@ export default function HomePage() {
                 }));
               }}
               minLength={500}
+              required
+              placeholder="Cole ao menos 500 caracteres da página oficial."
             />
           </label>
         </div>
-        {assistedStarted && !assistedReady && (
+        {!assistedReady && (
           <small className="file-limit-notice">
             Preencha as duas URLs e pelo menos 500 caracteres de cada página.
           </small>
         )}
-      </details>
+      </section>
 
       <p className={`status ${ready ? 'ready' : ''}`} role="status">
         <span aria-hidden="true" />
         {status}
       </p>
 
-      <button
-        className="analyze-button"
-        type="button"
-        disabled={!ready || started}
-        onClick={startAnalysis}
-      >
-        {started ? 'Análise em andamento' : 'Iniciar análise'}
-      </button>
+      <div className="primary-actions">
+        <button
+          className="analyze-button"
+          type="button"
+          disabled={!ready || started}
+          onClick={startAnalysis}
+        >
+          {started ? 'Análise em andamento' : 'Iniciar análise'}
+        </button>
+        <button
+          className="reset-button"
+          type="button"
+          disabled={runState === 'running'}
+          onClick={resetForm}
+        >
+          Limpar campos
+        </button>
+      </div>
 
       {showProgress && (
         <div className="modal-backdrop">
@@ -538,7 +670,7 @@ export default function HomePage() {
                   {runState === 'running' && (
                     <span className="spinner" aria-hidden="true" />
                   )}
-                  {runState === 'failed'
+                  {runState === 'failed' || runState === 'cancelled'
                     ? 'Análise interrompida'
                     : runState === 'succeeded'
                       ? 'Arquivos prontos'
@@ -550,6 +682,7 @@ export default function HomePage() {
                 className="close-button"
                 aria-label="Fechar acompanhamento"
                 onClick={hideProgress}
+                disabled={runState === 'running'}
               >
                 ×
               </button>
@@ -566,7 +699,9 @@ export default function HomePage() {
               <p id="progress-description" className="progress-description">
                 {runState === 'succeeded'
                   ? 'Processamento concluído e downloads liberados.'
-                  : 'O processamento foi encerrado. Consulte o erro abaixo.'}
+                  : runState === 'cancelled'
+                    ? 'A análise foi interrompida. Você pode ajustar os campos e iniciar novamente.'
+                    : 'Não foi possível concluir. Siga a orientação abaixo.'}
               </p>
             )}
             <div
@@ -618,6 +753,20 @@ export default function HomePage() {
             {error && (
               <p className="preview-notice error" role="alert">
                 {error}
+              </p>
+            )}
+            {runState === 'running' && (
+              <button
+                className="stop-button"
+                type="button"
+                onClick={stopAnalysis}
+              >
+                Parar análise
+              </button>
+            )}
+            {runState === 'cancelled' && !error && (
+              <p className="preview-notice" role="status">
+                Análise interrompida. Nenhum arquivo final foi gerado.
               </p>
             )}
             {runState === 'succeeded' && !error && (

@@ -13,7 +13,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal, cast
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Response, status
@@ -118,6 +118,8 @@ class DecisionRequest(BaseModel):
 
 class WorkflowRequest(BaseModel):
     idempotency_key: str = Field(alias="idempotencyKey", min_length=8, max_length=128)
+    journal_title: str | None = Field(alias="journalTitle", default=None, min_length=2, max_length=300)
+    journal_issn: str | None = Field(alias="journalIssn", default=None, pattern=r"^\d{4}-\d{3}[\dXx]$")
     scope_url: str | None = Field(alias="scopeUrl", default=None, pattern=r"^https://")
     guide_url: str | None = Field(alias="guideUrl", default=None, pattern=r"^https://")
     scope_snapshot: str | None = Field(alias="scopeSnapshot", default=None, min_length=500, max_length=200_000)
@@ -127,6 +129,12 @@ class WorkflowRequest(BaseModel):
         values = (self.scope_url, self.guide_url, self.scope_snapshot, self.guide_snapshot)
         if any(values) and not all(values):
             raise HTTPException(status_code=422, detail="The complete assisted-guidance package is required")
+        return all(values)
+
+    def has_supplied_identity(self) -> bool:
+        values = (self.journal_title, self.journal_issn)
+        if any(values) and not all(values):
+            raise HTTPException(status_code=422, detail="The complete journal identity is required")
         return all(values)
 
 
@@ -345,8 +353,29 @@ async def execute_project_workflow(
         raise HTTPException(status_code=409, detail="The complete upload package is required")
     report_progress("journal-resolution", 25)
     assisted = payload.has_assisted_guidance()
+    supplied_identity = payload.has_supplied_identity()
     resolved: dict[str, object]
-    if assisted:
+    if assisted and supplied_identity:
+        scope_domain = (urlparse(str(payload.scope_url)).hostname or "").casefold()
+        guide_domain = (urlparse(str(payload.guide_url)).hostname or "").casefold()
+        if not scope_domain or scope_domain != guide_domain:
+            raise HTTPException(status_code=422, detail="Scope and author guide must use the same official domain")
+        validate_public_https_url(str(payload.scope_url), scope_domain)
+        validate_public_https_url(str(payload.guide_url), scope_domain)
+        resolved = {
+            "title": str(payload.journal_title),
+            "issn": str(payload.journal_issn).upper(),
+            "officialDomain": scope_domain,
+            "homepageUrl": f"https://{scope_domain}/",
+            "scopeUrl": payload.scope_url,
+            "guideUrl": payload.guide_url,
+            "evidence": {
+                "provider": "user-supplied-official-package",
+                "sourceId": str(payload.scope_url),
+                "confidence": 1.0,
+            },
+        }
+    elif assisted:
         contact = os.getenv("JOURNAL_MATCHER_PROVIDER_EMAIL")
         if not contact:
             raise HTTPException(status_code=503, detail="Provider contact email is not configured")

@@ -129,6 +129,26 @@ def test_worker_retries_then_terminally_fails(
     assert failure_log["detail"] == "provider failed"
 
 
+def test_worker_honors_cancellation_during_workflow(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    store = FakeHostedStore()
+
+    async def cancelled_workflow(*args: object, **kwargs: object) -> dict[str, object]:
+        del args
+        store.job["state"] = "cancelled"
+        progress_callback = kwargs["progress_callback"]
+        assert callable(progress_callback)
+        progress_callback("journal-research", 40)
+        return {"state": "succeeded"}
+
+    monkeypatch.setattr("journal_matcher_worker.main.execute_project_workflow", cancelled_workflow)
+    assert process_message(store, QUEUE_ROW) is True  # type: ignore[arg-type]
+    assert store.deleted == [7]
+    assert not any(update.get("state") == "succeeded" for update in store.updates)
+    assert json.loads(capsys.readouterr().out)["event"] == "workflow.cancelled"
+
+
 def test_worker_discards_poison_and_terminal_messages() -> None:
     with pytest.raises(RuntimeError, match="invalid message envelope"):
         process_message(FakeHostedStore(), {"msg_id": "bad", "message": {}})  # type: ignore[arg-type]

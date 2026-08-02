@@ -18,6 +18,10 @@ from pydantic import ValidationError
 from journal_matcher_worker import __version__
 
 
+class WorkflowCancelledError(Exception):
+    """Stop a worker cleanly after the durable job is cancelled."""
+
+
 def health_payload() -> dict[str, str]:
     """Return the worker health contract without external side effects."""
     return {"service": "worker", "status": "ok", "version": __version__}
@@ -62,6 +66,9 @@ def process_message(store: HostedFoundationStore, queue_row: dict[str, Any]) -> 
 
     def report_progress(stage: str, progress: int) -> None:
         nonlocal current_stage, current_progress
+        latest = store.worker_job(job_id)
+        if latest is None or latest.get("state") == "cancelled":
+            raise WorkflowCancelledError
         current_stage = stage
         current_progress = progress
         store.update_worker_job(
@@ -83,6 +90,10 @@ def process_message(store: HostedFoundationStore, queue_row: dict[str, Any]) -> 
                 progress_callback=report_progress,
             )
         )
+    except WorkflowCancelledError:
+        store.delete_queue_message(message_id)
+        print(json.dumps({"event": "workflow.cancelled", "jobId": job_id}, sort_keys=True), flush=True)
+        return True
     except (HTTPException, ValidationError, RuntimeError, ValueError) as error:
         attempts = int(claimed.get("attempt_count", 1))
         terminal = attempts >= 3
@@ -122,6 +133,10 @@ def process_message(store: HostedFoundationStore, queue_row: dict[str, Any]) -> 
         return False
     if result.get("state") != "succeeded":
         raise RuntimeError("Workflow did not produce a successful terminal result")
+    latest = store.worker_job(job_id)
+    if latest is None or latest.get("state") == "cancelled":
+        store.delete_queue_message(message_id)
+        return True
     store.update_worker_job(job_id, state="succeeded", stage="artifacts-ready", progress=100)
     store.delete_queue_message(message_id)
     return True

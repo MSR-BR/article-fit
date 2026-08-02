@@ -3,7 +3,7 @@ import json
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from journal_matcher_api.main import _trigger_cloud_run_worker, app
+from journal_matcher_api.main import WorkflowRequest, _trigger_cloud_run_worker, app
 
 
 class FakeResponse:
@@ -59,3 +59,13 @@ def test_worker_trigger_fails_closed_without_metadata_token(monkeypatch: pytest.
     monkeypatch.setattr("journal_matcher_api.main.urlopen", lambda *args, **kwargs: FakeResponse(b"{}"))
     with pytest.raises(HTTPException, match="could not be started"):
         _trigger_cloud_run_worker()
+
+
+def test_workflow_request_requires_complete_guidance_and_identity() -> None:
+    incomplete_guidance = WorkflowRequest(idempotencyKey="request-001", scopeUrl="https://example.org/scope")
+    with pytest.raises(HTTPException, match="complete assisted-guidance"):
+        incomplete_guidance.has_assisted_guidance()
+
+    incomplete_identity = WorkflowRequest(idempotencyKey="request-002", journalTitle="Example Journal")
+    with pytest.raises(HTTPException, match="complete journal identity"):
+        incomplete_identity.has_supplied_identity()

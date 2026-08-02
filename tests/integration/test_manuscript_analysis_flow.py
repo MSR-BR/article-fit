@@ -118,9 +118,12 @@ def test_analysis_review_artifacts_and_tenant_isolation(
 def test_real_workflow_orchestrator_reaches_downloadable_artifacts(
     client: TestClient, store: FoundationStore, monkeypatch
 ) -> None:
+    openalex_calls: list[str] = []
+
     class WorkflowProvider(FakeProvider):
         def get(self, url: str, *, allowed_domain: str | None = None) -> bytes:
             if "api.openalex.org/sources" in url:
+                openalex_calls.append(url)
                 return (
                     b'{"results":[{"id":"https://openalex.org/S1","display_name":"Synthetic Journal",'
                     b'"alternate_titles":[],"issn_l":"1234-567X","homepage_url":"https://example.org/home",'
@@ -171,6 +174,8 @@ def test_real_workflow_orchestrator_reaches_downloadable_artifacts(
         headers=auth(),
         json={
             "idempotencyKey": "workflow-test-001",
+            "journalTitle": "Synthetic Journal",
+            "journalIssn": "1234-567X",
             "scopeUrl": "https://example.org/scope",
             "guideUrl": "https://example.org/guide",
             "scopeSnapshot": "Official scope for the journal. " + "verified scope evidence " * 30,
@@ -182,6 +187,7 @@ def test_real_workflow_orchestrator_reaches_downloadable_artifacts(
     assert workflow["state"] == "succeeded"
     assert workflow["stage"] == "artifacts-ready"
     assert len(workflow["artifacts"]) == 4
+    assert openalex_calls == []
     assert (
         store.get_project(Principal("invited-pilot-user", "11111111-1111-4111-8111-111111111111"), project_id)[
             "documents"
@@ -192,3 +198,18 @@ def test_real_workflow_orchestrator_reaches_downloadable_artifacts(
     assert main.profile_repository(store).official_snapshots(profile_id) == []
     for kind in ("revised-manuscript.docx", "revised-manuscript.pdf", "revision-report.pdf"):
         assert client.get(f"/v1/analyses/{workflow['analysisId']}/artifacts/{kind}", headers=auth()).status_code == 200
+
+    legacy_project_id = prepare_project(client)
+    legacy = client.post(
+        f"/v1/projects/{legacy_project_id}/run",
+        headers=auth(),
+        json={
+            "idempotencyKey": "workflow-legacy-001",
+            "scopeUrl": "https://example.org/scope",
+            "guideUrl": "https://example.org/guide",
+            "scopeSnapshot": "Official scope for the journal. " + "verified scope evidence " * 30,
+            "guideSnapshot": "Official author instructions. " + "verified author guidance " * 30,
+        },
+    )
+    assert legacy.status_code == 200, legacy.text
+    assert len(openalex_calls) == 1
