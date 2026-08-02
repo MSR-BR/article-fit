@@ -27,9 +27,10 @@ isolation, artifact download, deletion, and synthetic end-to-end tests pass.
 
 ## Verified pilot deployment
 
-- API: `https://article-fit-api-468465260392.us-east1.run.app`, revision `article-fit-api-00002-jnl`.
-- Worker: Cloud Run Job `article-fit-worker`, image tag `c11-20260801-3`.
-- Frontend: `https://article-fit.vercel.app`, production deployment `dpl_DUPeDZd3jWp4XTv5185hBLJ3ziG6`.
+- API: `https://article-fit-api-468465260392.us-east1.run.app`, revision `article-fit-api-00004-hl2`.
+- Worker: Cloud Run Job `article-fit-worker`, image tag `c12-20260801-1`.
+- Frontend: `https://article-fit.vercel.app`, production deployment `dpl_2EVNhNHxU6wrpgXwyjppqxJmB4Xv`.
 - API service scaling: minimum zero (default), maximum one, concurrency four, timeout 300 seconds.
-- Final worker health-check execution: `article-fit-worker-bqgzv`.
+- Final worker health-check execution: `article-fit-worker-4rs5w`.
 - Rollback drill: revision 2 to revision 1 and back to revision 2, with health and Vercel proxy checks passing.
+- Named access: public/anonymous sign-up disabled; owner OTP identity and workspace membership verified by the Vercel proxy and API.

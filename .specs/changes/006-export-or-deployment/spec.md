@@ -1,6 +1,6 @@
 # Change 006 — Export and Deployment
 
-Status: `in progress - C6.1 minimal local interface`
+Status: `hosted pilot active — owner workflow and release sign-off pending`
 
 ## Objective
 
@@ -52,6 +52,6 @@ Deploy the validated MVP as a secure invitation-only pilot with monitored export
 - [ ] Hosting/provider/privacy decisions and reviews are approved.
 - [ ] Staging release gates pass unchanged in the pilot environment.
 - [ ] Infrastructure, observability, budgets, backups, and deletion are verified.
-- [ ] Rollback and incident runbooks are exercised.
+- [x] Rollback and incident runbooks are exercised for the hosted API/worker deployment.
 - [ ] Pilot disclosures/support ownership are active.
 - [ ] Release manifest and sign-off are recorded.

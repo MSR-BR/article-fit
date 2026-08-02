@@ -1,6 +1,6 @@
 # Change 012 — Pilot Validation and Individual Access
 
-Status: `approved — implementation in progress`
+Status: `hosted validation — owner pilot pending`
 
 ## Objective
 
@@ -60,6 +60,6 @@ Replace the shared pilot bearer token with named, invitation-only Supabase Auth 
 - [x] Named authentication is implemented without exposing privileged credentials.
 - [x] Owner identity and workspace membership are provisioned; public and anonymous sign-up are disabled.
 - [x] Automated release gates pass locally; hosted smoke remains part of the deployment gate.
-- [ ] Production commit, push, and immutable deployments complete.
+- [x] Production commit, push, immutable deployments, authenticated smoke, and worker health check complete.
 - [ ] Owner-led hosted pilot and artifact review complete.
 - [ ] Change 005/006 sign-off state and residual risks are updated.
