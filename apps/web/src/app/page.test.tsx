@@ -570,7 +570,9 @@ describe('HomePage', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Start analysis' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6));
-    expect(JSON.parse(String(fetchMock.mock.calls[5]?.[1]?.body))).toMatchObject({
+    expect(
+      JSON.parse(String(fetchMock.mock.calls[5]?.[1]?.body)),
+    ).toMatchObject({
       journalTitle: 'Physical Review Letters',
       journalIssn: '0031-9007',
       scopeUrl: 'https://journals.aps.org/prl/about',

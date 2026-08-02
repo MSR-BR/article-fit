@@ -177,6 +177,90 @@ def _reference_excerpt(text: str) -> str:
     return "\n[...REFERENCE EXCERPT...]\n".join((clean[:part], clean[middle : middle + part], clean[-part:]))
 
 
+def _balanced_excerpt(text: str, limit: int) -> str:
+    """Keep the beginning, middle, and end when an evidence field needs compaction."""
+    clean = str(text)
+    if len(clean) <= limit:
+        return clean
+    part = max(1, (limit - 64) // 3)
+    middle = max(0, (len(clean) - part) // 2)
+    return "\n[...COMPACTED EVIDENCE...]\n".join((clean[:part], clean[middle : middle + part], clean[-part:]))
+
+
+def _bound_nested_evidence(value: object, *, string_limit: int) -> object:
+    """Bound untrusted nested strings while retaining keys, records, and source identifiers."""
+    if isinstance(value, str):
+        return _balanced_excerpt(value, string_limit)
+    if isinstance(value, list):
+        return [_bound_nested_evidence(item, string_limit=string_limit) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _bound_nested_evidence(item, string_limit=string_limit) for key, item in value.items()}
+    return value
+
+
+def _compact_editorial_package(package: dict[str, object], *, aggressive: bool = False) -> dict[str, object]:
+    """Fit evidence safely without dropping manuscript anchors or bibliography records."""
+    segment_budget = 24_000 if aggressive else 42_000
+    segment_cap = 2_400 if aggressive else 4_500
+    reference_cap = 5_000 if aggressive else 9_000
+    nested_cap = 500 if aggressive else 900
+    label_cap = 140 if aggressive else 220
+    identifier_cap = 100 if aggressive else 160
+
+    raw_segments = package.get("manuscriptSegments", [])
+    segments = raw_segments if isinstance(raw_segments, list) else []
+    per_segment = min(segment_cap, max(700, segment_budget // max(1, len(segments))))
+    compact_segments = [
+        {
+            "anchor": str(item.get("anchor", "document"))[:200],
+            "text": _balanced_excerpt(str(item.get("text", "")), per_segment),
+        }
+        for item in segments
+        if isinstance(item, dict)
+    ]
+
+    raw_references = package.get("uploadedReferenceArticleExcerpts", [])
+    references = raw_references if isinstance(raw_references, list) else []
+    compact_references = [
+        {
+            "sourceId": str(item.get("sourceId", ""))[:200],
+            "excerpt": _balanced_excerpt(str(item.get("excerpt", "")), reference_cap),
+        }
+        for item in references
+        if isinstance(item, dict)
+    ]
+
+    raw_literature = package.get("manuscriptBibliographyAndRecentLiterature", [])
+    literature = raw_literature if isinstance(raw_literature, list) else []
+    compact_literature = [
+        {
+            "sourceId": str(item.get("sourceId", ""))[:120],
+            "sourceType": str(item.get("sourceType", ""))[:60],
+            "label": _balanced_excerpt(str(item.get("label", "")), label_cap),
+            "identifier": str(item.get("identifier", ""))[:identifier_cap],
+            "year": str(item.get("year", ""))[:20],
+            "status": str(item.get("status", ""))[:60],
+        }
+        for item in literature
+        if isinstance(item, dict)
+    ]
+
+    compact = dict(package)
+    compact["manuscriptSegments"] = compact_segments
+    compact["uploadedReferenceArticleExcerpts"] = compact_references
+    compact["officialScopeExcerpt"] = _balanced_excerpt(
+        str(package.get("officialScopeExcerpt", "")), 5_000 if aggressive else 8_000
+    )
+    compact["manuscriptBibliographyAndRecentLiterature"] = compact_literature
+    for key in (
+        "officialRules",
+        "observedJournalProfileClaims",
+        "existingDeterministicRecommendations",
+    ):
+        compact[key] = _bound_nested_evidence(package.get(key, []), string_limit=nested_cap)
+    return compact
+
+
 def build_editorial_prompt(
     *,
     journal_title: str,
@@ -219,13 +303,13 @@ def build_editorial_prompt(
             {
                 "sourceId": source_id,
                 "sourceType": str(item.get("sourceType", "literature-candidate"))[:100],
-                "label": str(item.get("label", ""))[:1_000],
+                "label": str(item.get("label", ""))[:500],
                 "identifier": str(item.get("identifier", ""))[:300],
                 "year": str(item.get("year", ""))[:20],
                 "status": str(item.get("status", "candidate"))[:100],
             }
         )
-    package = {
+    package: dict[str, object] = {
         "journalTitle": journal_title[:300],
         "allowedSourceIds": sorted(source_ids),
         "officialRules": official_rules,
@@ -272,6 +356,12 @@ never to claim topical similarity. Avoid duplicates of existing deterministic re
 requested JSON schema."""
     prompt = f"{instructions}\n\nEVIDENCE_PACKAGE_JSON\n{json.dumps(package, ensure_ascii=False, sort_keys=True)}"
     if len(prompt) > MAX_PROMPT_CHARACTERS:
+        package = _compact_editorial_package(package)
+        prompt = f"{instructions}\n\nEVIDENCE_PACKAGE_JSON\n{json.dumps(package, ensure_ascii=False, sort_keys=True)}"
+    if len(prompt) > MAX_PROMPT_CHARACTERS:
+        package = _compact_editorial_package(package, aggressive=True)
+        prompt = f"{instructions}\n\nEVIDENCE_PACKAGE_JSON\n{json.dumps(package, ensure_ascii=False, sort_keys=True)}"
+    if len(prompt) > MAX_PROMPT_CHARACTERS:
         raise ValueError("Editorial evidence package exceeds the safe prompt limit")
     return prompt, source_ids
 
@@ -287,9 +377,11 @@ def proposals_as_recommendations(
     severity = {"high": "strongly-recommended", "medium": "recommended", "low": "optional"}
     recommendations: list[dict[str, object]] = []
     for proposal in response.proposals:
+        valid_source_ids = [source_id for source_id in proposal.source_ids if source_id in allowed_source_ids]
         unknown = set(proposal.source_ids) - allowed_source_ids
-        if unknown:
-            raise GeminiProviderError("Gemini cited evidence outside the supplied editorial package")
+        basis = proposal.basis
+        if basis != "expert-suggestion" and not valid_source_ids:
+            basis = "expert-suggestion"
         identity = json.dumps(
             [profile_version_id, proposal.anchor, proposal.category, proposal.rationale], ensure_ascii=False
         )
@@ -308,14 +400,17 @@ def proposals_as_recommendations(
                 "journalExpectation": proposal.journal_expectation,
                 "referencePattern": proposal.reference_pattern,
                 "authorAction": proposal.action,
-                "basis": proposal.basis,
-                "sourceIds": proposal.source_ids,
-                "sourceLabels": [
-                    (source_catalog or {}).get(source_id, source_id) for source_id in proposal.source_ids
-                ],
-                "evidenceCoverage": f"{len(proposal.source_ids)} source(s)",
-                "confidence": 0.7 if proposal.basis == "expert-suggestion" else 0.8,
-                "uncertainty": "AI-assisted editorial proposal; author and expert verification required.",
+                "basis": basis,
+                "sourceIds": valid_source_ids,
+                "sourceLabels": [(source_catalog or {}).get(source_id, source_id) for source_id in valid_source_ids],
+                "evidenceCoverage": f"{len(valid_source_ids)} source(s)",
+                "confidence": 0.7 if basis == "expert-suggestion" else 0.8,
+                "uncertainty": (
+                    "Unsupported provider source identifiers were removed; treat this as an expert suggestion "
+                    "requiring author verification."
+                    if unknown
+                    else "AI-assisted editorial proposal; author and expert verification required."
+                ),
                 "scientificImpact": proposal.scientific_impact,
                 "authorValidationRequired": proposal.author_validation_required,
                 "decision": "pending",
@@ -605,9 +700,59 @@ def _normalize_editorial_payload(value: object) -> object:
             if key == "proposedText" and item.get(key) is None:
                 continue
             item[key] = _bounded(item.get(key), limit)
+        basis = str(item.get("basis", "expert-suggestion"))
+        basis = {
+            "official": "official-requirement",
+            "requirement": "official-requirement",
+            "observed": "observed-pattern",
+            "pattern": "observed-pattern",
+            "expert": "expert-suggestion",
+            "suggestion": "expert-suggestion",
+        }.get(basis, basis)
+        if basis not in {"official-requirement", "observed-pattern", "expert-suggestion"}:
+            basis = "expert-suggestion"
+        item["basis"] = basis
+        priority = str(item.get("priority", "medium")).lower().replace("_", "-").strip()
+        item["priority"] = {
+            "critical": "required",
+            "mandatory": "required",
+            "essential": "required",
+            "must": "required",
+            "strongly-recommended": "high",
+            "major": "high",
+            "recommended": "medium",
+            "moderate": "medium",
+            "normal": "medium",
+            "optional": "low",
+            "minor": "low",
+            "query": "question",
+        }.get(priority, priority if priority in {"required", "high", "medium", "low", "question"} else "medium")
+        if not str(item.get("referencePattern", "")).strip():
+            item["referencePattern"] = {
+                "official-requirement": (
+                    "Official requirement represented by the cited source; "
+                    "verify the exact wording in the author guide."
+                ),
+                "observed-pattern": (
+                    "Editorial pattern inferred from the cited journal sample; it is not a formal requirement."
+                ),
+                "expert-suggestion": (
+                    "Expert editorial recommendation; no journal-specific publication pattern is asserted."
+                ),
+            }.get(basis, "Evidence basis must be verified by the author before implementation.")
+        if not str(item.get("journalExpectation", "")).strip():
+            item["journalExpectation"] = (
+                "Verify this editorial expectation against the supplied journal evidence before implementation."
+            )
         source_ids = item.get("sourceIds")
         if isinstance(source_ids, list):
             item["sourceIds"] = [_bounded(source_id, 200) for source_id in source_ids[:20]]
+        else:
+            item["sourceIds"] = []
+        if basis != "expert-suggestion" and not item["sourceIds"]:
+            item["basis"] = "expert-suggestion"
+        if bool(item.get("scientificImpact")):
+            item["authorValidationRequired"] = True
         clean.append(item)
     normalized["proposals"] = clean
     return normalized

@@ -39,4 +39,4 @@ Prevent external AI or research-provider failures from destroying an otherwise v
 - [x] Stable model and fallback implemented.
 - [x] Schema rejection fallback implemented.
 - [x] Memory/editorial degradation implemented.
-- [ ] Tests and production validation passed.
+- [x] Tests and production validation passed.

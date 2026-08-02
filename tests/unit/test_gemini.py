@@ -163,12 +163,13 @@ def test_rejects_empty_prompt_and_non_stop_generation(monkeypatch: pytest.Monkey
         client.generate("Prompt")
 
 
-def test_rejects_unsafe_scientific_change(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_marks_scientific_change_for_author_validation(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "journal_matcher_api.gemini.urlopen", lambda *_a, **_k: FakeResponse(editorial(scientific=True))
     )
-    with pytest.raises(GeminiProviderError, match="invalid structured"):
-        GeminiEditorialClient(api_key="secret").generate("Prompt")
+    result = GeminiEditorialClient(api_key="secret").generate("Prompt")
+    assert result.response.proposals[0].scientific_impact is True
+    assert result.response.proposals[0].author_validation_required is True
 
 
 def test_normalizes_provider_error_without_leaks(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -207,13 +208,47 @@ def test_builds_bounded_untrusted_evidence_package() -> None:
     assert source_ids == {"article-1", "guide-1", "uploaded-reference-1"}
 
 
-def test_maps_proposals_and_rejects_unknown_citations() -> None:
+def test_compacts_large_editorial_package_without_dropping_bibliography_or_anchors() -> None:
+    bibliography = [
+        {
+            "sourceId": f"manuscript-reference-{index}",
+            "sourceType": "manuscript-bibliography",
+            "label": f"[{index}] " + ("Long bibliographic record " * 80),
+            "identifier": f"10.1000/example.{index}",
+            "year": "2025",
+            "status": "manuscript-supplied",
+        }
+        for index in range(1, 68)
+    ]
+    prompt, source_ids = build_editorial_prompt(
+        journal_title="Physical Review Letters",
+        manuscript_segments=[
+            {"anchor": f"page:{index}", "text": "manuscript evidence " * 1_000} for index in range(1, 31)
+        ],
+        profile_claims=[{"key": "pattern", "summary": "observed pattern " * 2_000}],
+        official_rules=[{"key": "rule", "summary": "official rule " * 2_000}],
+        deterministic_recommendations=[{"key": "recommendation", "rationale": "reason " * 2_000}],
+        reference_article_texts=["reference architecture " * 5_000 for _ in range(3)],
+        official_scope_text="official scope " * 5_000,
+        literature_evidence=bibliography,
+    )
+    assert len(prompt) <= 180_000
+    assert '"anchor": "page:1"' in prompt
+    assert '"anchor": "page:30"' in prompt
+    assert "manuscript-reference-1" in prompt
+    assert "manuscript-reference-67" in prompt
+    assert "manuscript-reference-67" in source_ids
+
+
+def test_maps_proposals_and_sanitizes_unknown_citations() -> None:
     response = EditorialResponse.model_validate(editorial())
     mapped = proposals_as_recommendations(response, profile_version_id="profile-1", allowed_source_ids={"source-1"})
     assert mapped[0]["origin"] == "gemini-editorial-review"
     assert mapped[0]["decision"] == "pending"
-    with pytest.raises(GeminiProviderError, match="outside"):
-        proposals_as_recommendations(response, profile_version_id="profile-1", allowed_source_ids=set())
+    sanitized = proposals_as_recommendations(response, profile_version_id="profile-1", allowed_source_ids=set())
+    assert sanitized[0]["basis"] == "expert-suggestion"
+    assert sanitized[0]["sourceIds"] == []
+    assert "Unsupported provider source identifiers were removed" in sanitized[0]["uncertainty"]
 
 
 def test_rejects_superficial_review_and_accepts_complete_coverage() -> None:
@@ -244,6 +279,65 @@ def test_rejects_superficial_review_and_accepts_complete_coverage() -> None:
         {**template, "category": dimension, "anchor": f"page:{index + 1}"} for index, dimension in enumerate(dimensions)
     ]
     validate_scientific_coverage(EditorialResponse.model_validate(complete))
+
+
+def test_normalizes_blank_provider_pattern_without_inventing_a_journal_rule(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = editorial()
+    payload["proposals"][0]["basis"] = "observed-pattern"
+    payload["proposals"][0]["referencePattern"] = ""
+
+    class PatternResponse(FakeResponse):
+        def __init__(self) -> None:
+            self.stream = BytesIO(
+                json.dumps(
+                    {
+                        "candidates": [
+                            {
+                                "finishReason": "STOP",
+                                "content": {"parts": [{"text": json.dumps(payload)}]},
+                            }
+                        ]
+                    }
+                ).encode()
+            )
+
+    monkeypatch.setattr("journal_matcher_api.gemini.urlopen", lambda *_args, **_kwargs: PatternResponse())
+    result = GeminiEditorialClient(api_key="secret").generate("Prompt")
+    assert "not a formal requirement" in result.response.proposals[0].reference_pattern
+
+
+def test_normalizes_provider_priority_and_scientific_safety_drift(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = editorial()
+    proposal = payload["proposals"][0]
+    proposal["priority"] = "strongly_recommended"
+    proposal["basis"] = "observed"
+    proposal["sourceIds"] = []
+    proposal["scientificImpact"] = True
+    proposal["authorValidationRequired"] = False
+
+    class DriftResponse(FakeResponse):
+        def __init__(self) -> None:
+            self.stream = BytesIO(
+                json.dumps(
+                    {
+                        "candidates": [
+                            {
+                                "finishReason": "STOP",
+                                "content": {"parts": [{"text": json.dumps(payload)}]},
+                            }
+                        ]
+                    }
+                ).encode()
+            )
+
+    monkeypatch.setattr("journal_matcher_api.gemini.urlopen", lambda *_args, **_kwargs: DriftResponse())
+    result = GeminiEditorialClient(api_key="secret").generate("Prompt")
+    normalized = result.response.proposals[0]
+    assert normalized.priority == "high"
+    assert normalized.basis == "expert-suggestion"
+    assert normalized.author_validation_required is True
 
 
 def test_builds_bounded_coverage_repair_and_feedback_prompts() -> None:

@@ -1075,19 +1075,19 @@ async def _create_ai_review(
             continue
         for source_id in claim_source_ids:
             labels.setdefault(str(source_id), str(claim.get("summary", source_id))[:1_000])
-    prompt, allowed_source_ids = build_editorial_prompt(
-        journal_title=str(cast(dict[str, object], project["journal"])["title"]),
-        manuscript_segments=cast(list[dict[str, object]], manuscript["segments"]),
-        profile_claims=cast(list[dict[str, object]], profile["claims"]),
-        official_rules=cast(list[dict[str, object]], analysis["rules"]),
-        deterministic_recommendations=cast(list[dict[str, object]], analysis["recommendations"]),
-        reference_article_texts=store.reference_texts(principal, str(analysis["projectId"])),
-        official_scope_text=scope_text,
-        literature_evidence=literature,
-    )
-    if progress_callback is not None:
-        progress_callback("scientific-review", 84)
     try:
+        prompt, allowed_source_ids = build_editorial_prompt(
+            journal_title=str(cast(dict[str, object], project["journal"])["title"]),
+            manuscript_segments=cast(list[dict[str, object]], manuscript["segments"]),
+            profile_claims=cast(list[dict[str, object]], profile["claims"]),
+            official_rules=cast(list[dict[str, object]], analysis["rules"]),
+            deterministic_recommendations=cast(list[dict[str, object]], analysis["recommendations"]),
+            reference_article_texts=store.reference_texts(principal, str(analysis["projectId"])),
+            official_scope_text=scope_text,
+            literature_evidence=literature,
+        )
+        if progress_callback is not None:
+            progress_callback("scientific-review", 84)
         client = GeminiEditorialClient()
         result = client.generate(prompt)
         try:
@@ -1101,7 +1101,7 @@ async def _create_ai_review(
             allowed_source_ids=allowed_source_ids,
             source_catalog=labels,
         )
-    except GeminiConfigurationError as error:
+    except (GeminiConfigurationError, ValueError) as error:
         print(json.dumps({"event": "editorial-review.degraded", "reason": str(error)}), flush=True)
         review_limitations.append(
             "The AI-assisted scientific review was unavailable; the report contains deterministic checks only."

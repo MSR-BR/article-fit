@@ -197,7 +197,9 @@ export default function HomePage() {
     : (progressStages[activeStep]?.message ?? '');
 
   const manualValues = Object.values(guidance).map((value) => value.trim());
-  const manualRequested = Boolean(journalIssn.trim() || manualValues.some(Boolean));
+  const manualRequested = Boolean(
+    journalIssn.trim() || manualValues.some(Boolean),
+  );
   const officialUrlsReady = sameOfficialDomain(
     guidance.scopeUrl.trim(),
     guidance.guideUrl.trim(),
@@ -592,8 +594,8 @@ export default function HomePage() {
       <details className="assisted-guidance">
         <summary>Only if automatic journal lookup fails</summary>
         <p>
-          Normally, leave this closed. If Article Fit asks for help, provide
-          the ISSN and both official pages; no copied page text is required.
+          Normally, leave this closed. If Article Fit asks for help, provide the
+          ISSN and both official pages; no copied page text is required.
         </p>
         <div className="assisted-grid">
           <label>
@@ -638,8 +640,8 @@ export default function HomePage() {
         </div>
         {manualRequested && !manualReady && (
           <small className="file-limit-notice">
-            Complete all three fields, using official HTTPS pages from the
-            same publisher domain, or clear them to return to automatic lookup.
+            Complete all three fields, using official HTTPS pages from the same
+            publisher domain, or clear them to return to automatic lookup.
           </small>
         )}
       </details>

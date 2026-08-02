@@ -32,8 +32,7 @@ Prove the hosted workflow completes from minimal input to all three downloadable
 
 ## Completion checklist
 
-- [ ] Automated gates passed.
-- [ ] Hosted end-to-end execution passed.
-- [ ] Visual artifact QA passed.
-- [ ] CPD complete.
-
+- [x] Automated gates passed.
+- [x] Hosted end-to-end execution passed.
+- [x] Visual artifact QA passed.
+- [x] CPD complete.
