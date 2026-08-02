@@ -59,6 +59,24 @@ Author Two, Another sufficiently long unnumbered bibliography entry, Journal 2 (
     assert extract_bibliography("No reference section here") == ()
 
 
+def test_detects_dense_end_bibliography_without_heading() -> None:
+    text = (
+        "Long manuscript body with equations and discussion. " * 40
+        + "\n[1] First complete reference, Physical Review Letters 120, 1 (2020)."
+        + "\n[2] Second complete reference, Physical Review E 10, 2 (2021)."
+        + "\n[3] Third complete reference, Nature Physics 3, 3 (2022)."
+        + "\n[4] Fourth complete reference, PRX Quantum 4, 4 (2023)."
+        + "\n[5] Fifth complete reference, Science 5, 5 (2024)."
+        + "\n[6] Sixth complete reference, arXiv:2501.01234 (2025)."
+    )
+
+    bibliography = extract_bibliography(text)
+
+    assert len(bibliography) == 6
+    assert bibliography[0].number == 1
+    assert bibliography[-1].arxiv_id == "2501.01234"
+
+
 def test_builds_deduplicated_recent_evidence_and_catalog() -> None:
     papers = [
         {"title": "Recent result", "doi": "10.1000/example", "year": 2025},

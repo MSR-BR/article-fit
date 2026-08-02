@@ -48,9 +48,18 @@ def _section(text: str, heading: str) -> str:
 
 def extract_bibliography(text: str, *, maximum: int = 80) -> tuple[BibliographyEntry, ...]:
     heading = REFERENCE_HEADING.search(text)
-    if not heading:
-        return ()
-    body = text[heading.end() :].strip()
+    if heading:
+        body = text[heading.end() :].strip()
+    else:
+        candidates = list(NUMBERED_REFERENCE.finditer(text))
+        starts = [
+            match
+            for match in candidates
+            if int(match.group(1) or match.group(2) or 0) == 1 and match.start() >= len(text) * 0.4
+        ]
+        if not starts or len(candidates) < 5:
+            return ()
+        body = text[starts[-1].start() :].strip()
     matches = list(NUMBERED_REFERENCE.finditer(body))
     chunks: list[tuple[int, str]] = []
     if matches:

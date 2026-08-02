@@ -547,7 +547,7 @@ async def execute_project_workflow(
     report_progress("manuscript-analysis", 62)
     analysis = await create_analysis(project_id, AnalysisRequest(profileVersionId=str(profile["id"])), principal, store)
     report_progress("ai-review", 78)
-    enriched = await create_ai_review(str(analysis["id"]), principal, store)
+    enriched = await _create_ai_review(str(analysis["id"]), principal, store, report_progress)
     report_progress("artifact-generation", 90)
     artifact_result = await generate_artifacts(str(analysis["id"]), principal, store)
     report_progress("artifact-generation", 98)
@@ -1004,6 +1004,15 @@ async def get_latest_project_analysis(
 async def create_ai_review(
     analysis_id: str, principal: PrincipalDependency, store: StoreDependency
 ) -> dict[str, object]:
+    return await _create_ai_review(analysis_id, principal, store)
+
+
+async def _create_ai_review(
+    analysis_id: str,
+    principal: Principal,
+    store: Store,
+    progress_callback: Callable[[str, int], None] | None = None,
+) -> dict[str, object]:
     repository = analysis_repository(store)
     repository.migrate()
     analysis = repository.get(principal, analysis_id)
@@ -1051,6 +1060,8 @@ async def create_ai_review(
         review_limitations.append(
             "The recent-literature search was not configured; bibliography-based positioning remains provisional."
         )
+    if progress_callback is not None:
+        progress_callback("literature-audit", 82)
     labels = source_catalog(literature)
     for snapshot in snapshots:
         labels[str(snapshot.get("source_id", ""))] = (
@@ -1074,6 +1085,8 @@ async def create_ai_review(
         official_scope_text=scope_text,
         literature_evidence=literature,
     )
+    if progress_callback is not None:
+        progress_callback("scientific-review", 84)
     try:
         client = GeminiEditorialClient()
         result = client.generate(prompt)
@@ -1093,6 +1106,8 @@ async def create_ai_review(
         review_limitations.append(
             "The AI-assisted scientific review was unavailable; the report contains deterministic checks only."
         )
+        if progress_callback is not None:
+            progress_callback("scientific-review", 88)
         enriched = repository.add_ai_review(principal, analysis_id, [], review_limitations)
         return enriched
     except GeminiProviderError as error:
@@ -1100,8 +1115,12 @@ async def create_ai_review(
         review_limitations.append(
             "The AI-assisted scientific review was unavailable; the report contains deterministic checks only."
         )
+        if progress_callback is not None:
+            progress_callback("scientific-review", 88)
         enriched = repository.add_ai_review(principal, analysis_id, [], review_limitations)
         return enriched
+    if progress_callback is not None:
+        progress_callback("scientific-review", 88)
     enriched = repository.add_ai_review(
         principal, analysis_id, recommendations, [*result.response.limitations, *review_limitations]
     )
