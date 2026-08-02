@@ -257,7 +257,12 @@ async def health() -> HealthResponse:
 
 
 @app.post("/v1/journals/resolve", tags=["journals"])
-async def resolve_journal(payload: JournalResolveRequest, principal: PrincipalDependency) -> dict[str, object]:
+async def resolve_journal(
+    payload: JournalResolveRequest,
+    principal: PrincipalDependency,
+    store: StoreDependency,
+) -> dict[str, object]:
+    del principal
     contact = os.getenv("JOURNAL_MATCHER_PROVIDER_EMAIL")
     if not contact:
         raise HTTPException(status_code=503, detail="Provider contact email is not configured")
@@ -268,11 +273,49 @@ async def resolve_journal(payload: JournalResolveRequest, principal: PrincipalDe
         if not isinstance(metadata, dict):
             raise JournalResolutionError("Journal metadata provider returned an invalid response")
         journal = resolve_openalex_sources(payload.candidate, metadata)
-        homepage = client.get(journal.homepage_url, allowed_domain=journal.official_domain).decode(
-            "utf-8", errors="replace"
-        )
+        cached_guidance: OfficialGuidance | None = None
+        profiles = profile_repository(store)
+        profiles.migrate()
+        previous = profiles.current(journal.issn)
+        if previous:
+            evidence = previous.get("evidence", [])
+            if isinstance(evidence, list):
+                scope_url = next(
+                    (
+                        str(item.get("canonical_url"))
+                        for item in reversed(evidence)
+                        if isinstance(item, dict)
+                        and item.get("source_type") == "official-scope"
+                        and item.get("canonical_url")
+                    ),
+                    "",
+                )
+                guide_url = next(
+                    (
+                        str(item.get("canonical_url"))
+                        for item in reversed(evidence)
+                        if isinstance(item, dict)
+                        and item.get("source_type") == "official-guide"
+                        and item.get("canonical_url")
+                    ),
+                    "",
+                )
+                if scope_url and guide_url:
+                    try:
+                        validate_public_https_url(scope_url, journal.official_domain)
+                        validate_public_https_url(guide_url, journal.official_domain)
+                        cached_guidance = OfficialGuidance(scope_url, guide_url)
+                    except HTTPException:
+                        cached_guidance = None
         try:
+            homepage = client.get(journal.homepage_url, allowed_domain=journal.official_domain).decode(
+                "utf-8", errors="replace"
+            )
             guidance = discover_official_guidance(journal.homepage_url, journal.official_domain, homepage)
+        except HTTPException:
+            if cached_guidance is None:
+                raise
+            guidance = cached_guidance
         except JournalResolutionError as initial_error:
             links = re.findall(r"href=[\"']([^\"']+)[\"']", homepage, flags=re.I)
             navigation: list[str] = []
@@ -297,7 +340,9 @@ async def resolve_journal(payload: JournalResolveRequest, principal: PrincipalDe
                 except (HTTPException, JournalResolutionError):
                     continue
             if discovered_guidance is None:
-                raise initial_error
+                if cached_guidance is None:
+                    raise initial_error
+                discovered_guidance = cached_guidance
             guidance = discovered_guidance
     except (json.JSONDecodeError, JournalResolutionError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from None
@@ -460,7 +505,9 @@ async def execute_project_workflow(
             "evidence": {"provider": "OpenAlex", "sourceId": identity.source_id, "confidence": identity.confidence},
         }
     else:
-        resolved = await resolve_journal(JournalResolveRequest(candidate=str(project["journalCandidate"])), principal)
+        resolved = await resolve_journal(
+            JournalResolveRequest(candidate=str(project["journalCandidate"])), principal, store
+        )
     store.confirm_journal(
         principal,
         project_id,

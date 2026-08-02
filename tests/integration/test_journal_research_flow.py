@@ -116,6 +116,59 @@ def test_resolve_journal_follows_official_navigation_page(client: TestClient, mo
     assert response.json()["guideUrl"] == "https://journals.aps.org/prl/authors"
 
 
+def test_resolve_journal_uses_public_memory_when_publisher_blocks(client: TestClient, monkeypatch) -> None:
+    class BlockingProvider:
+        def __init__(self, _contact_email: str) -> None:
+            pass
+
+        def get(self, url: str, *, allowed_domain: str | None = None) -> bytes:
+            if "api.openalex.org/sources" in url:
+                return json.dumps(
+                    {
+                        "results": [
+                            {
+                                "id": "https://openalex.org/S123",
+                                "display_name": "Physical Review Letters",
+                                "alternate_titles": ["PRL"],
+                                "issn_l": "0031-9007",
+                                "homepage_url": "https://journals.aps.org/prl",
+                                "type": "journal",
+                            }
+                        ]
+                    }
+                ).encode()
+            raise main.HTTPException(status_code=502, detail="Provider returned HTTP 403")
+
+    class CachedProfiles:
+        def migrate(self) -> None:
+            pass
+
+        def current(self, _issn: str) -> dict[str, object]:
+            return {
+                "evidence": [
+                    {
+                        "source_type": "official-scope",
+                        "canonical_url": "https://journals.aps.org/prl/about",
+                    },
+                    {
+                        "source_type": "official-guide",
+                        "canonical_url": "https://journals.aps.org/prl/authors",
+                    },
+                ]
+            }
+
+    monkeypatch.setenv("JOURNAL_MATCHER_PROVIDER_EMAIL", "research@example.org")
+    monkeypatch.setattr(main, "PoliteHttpClient", BlockingProvider)
+    monkeypatch.setattr(main, "profile_repository", lambda _store: CachedProfiles())
+    monkeypatch.setattr(main, "validate_public_https_url", lambda *_args: None)
+
+    response = client.post("/v1/journals/resolve", headers=auth(), json={"candidate": "Physical Review Letters"})
+
+    assert response.status_code == 200
+    assert response.json()["scopeUrl"] == "https://journals.aps.org/prl/about"
+    assert response.json()["guideUrl"] == "https://journals.aps.org/prl/authors"
+
+
 def prepare_project(client: TestClient) -> str:
     project_id = create_project(client)
     response = client.put(
