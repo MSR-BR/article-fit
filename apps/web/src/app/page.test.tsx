@@ -238,6 +238,43 @@ describe('HomePage', () => {
     expect(document.querySelector('.step-spinner')).toBeNull();
   });
 
+  it('does not blame missing inputs for a persistence conflict after research', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ id: 'project-conflict' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'reference-1' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'reference-2' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'reference-3' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'manuscript' }))
+      .mockResolvedValueOnce(
+        jsonResponse({ id: 'job-conflict', state: 'queued' }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          state: 'failed',
+          stage: 'manuscript-analysis',
+          progress: 62,
+          errorCode: 'workflow-409',
+          errorDetail: 'Hosted persistence conflict',
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    render(<HomePage />);
+    completePackage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start analysis' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'could not save an intermediate result',
+    );
+    expect(screen.getByRole('alert')).not.toHaveTextContent(
+      'every required field',
+    );
+    expect(screen.getByRole('alert')).not.toHaveTextContent(
+      'Hosted persistence conflict',
+    );
+  });
+
   it('shows milestone-based progress and one confirmed activity while running', () => {
     vi.stubGlobal(
       'fetch',

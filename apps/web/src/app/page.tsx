@@ -118,7 +118,9 @@ function workflowError(job: JobStatus) {
       : code.includes('422')
         ? 'Review the fields and uploaded files. One item could not be validated safely.'
         : code.includes('409')
-          ? 'Check that every required field and document was supplied, then try again.'
+          ? job.progress >= 34
+            ? 'The analysis could not save an intermediate result. Reset the form and try again.'
+            : 'Check that every required field and document was supplied, then try again.'
           : 'The analysis could not be completed. Check the fields and files, then try again in a few minutes.';
 }
 

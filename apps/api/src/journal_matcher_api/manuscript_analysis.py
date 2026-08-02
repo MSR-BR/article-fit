@@ -57,6 +57,21 @@ def stable_id(*parts: object) -> str:
     return str(uuid.UUID(digest[:32]))
 
 
+def scope_analysis_records(
+    analysis_id: str, record_type: str, records: list[dict[str, object]]
+) -> list[dict[str, object]]:
+    """Give child records an analysis-scoped identity for safe cross-project reuse."""
+    scoped: list[dict[str, object]] = []
+    for record in records:
+        original_id = record.get("id")
+        if not isinstance(original_id, str) or not original_id:
+            raise HTTPException(status_code=422, detail=f"{record_type} record is missing an identity")
+        item = dict(record)
+        item["id"] = stable_id(analysis_id, record_type, original_id)
+        scoped.append(item)
+    return scoped
+
+
 def scientific_invariants(text: str) -> dict[str, list[str]]:
     return {
         "numbers": re.findall(r"(?<!\w)[+-]?\d+(?:[.,]\d+)?%?", text),
@@ -518,6 +533,8 @@ class AnalysisRepository:
         limitations: list[str],
     ) -> dict[str, object]:
         analysis_id = stable_id(principal.workspace_id, project_id, profile_version_id, manuscript_hash)
+        scoped_rules = scope_analysis_records(analysis_id, "guide-rule", rules)
+        scoped_recommendations = scope_analysis_records(analysis_id, "recommendation", recommendations)
         with closing(sqlite3.connect(self.database_path)) as connection, connection:
             existing = connection.execute("SELECT id FROM analysis_runs WHERE id = ?", (analysis_id,)).fetchone()
             if not existing:
@@ -536,11 +553,14 @@ class AnalysisRepository:
                 )
                 connection.executemany(
                     "INSERT INTO guide_rules VALUES (?, ?, ?)",
-                    [(str(rule["id"]), analysis_id, json.dumps(rule, sort_keys=True)) for rule in rules],
+                    [(str(rule["id"]), analysis_id, json.dumps(rule, sort_keys=True)) for rule in scoped_rules],
                 )
                 connection.executemany(
                     "INSERT INTO recommendations VALUES (?, ?, ?)",
-                    [(str(item["id"]), analysis_id, json.dumps(item, sort_keys=True)) for item in recommendations],
+                    [
+                        (str(item["id"]), analysis_id, json.dumps(item, sort_keys=True))
+                        for item in scoped_recommendations
+                    ],
                 )
         return self.get(principal, analysis_id)
 
@@ -612,10 +632,11 @@ class AnalysisRepository:
         """Append an idempotent AI review to an existing workspace-scoped analysis."""
         analysis = self.get(principal, analysis_id)
         merged_limitations = list(dict.fromkeys([*analysis["limitations"], *limitations]))  # type: ignore[misc]
+        scoped_recommendations = scope_analysis_records(analysis_id, "recommendation", recommendations)
         with closing(sqlite3.connect(self.database_path)) as connection, connection:
             connection.executemany(
                 "INSERT OR IGNORE INTO recommendations VALUES (?, ?, ?)",
-                [(str(item["id"]), analysis_id, json.dumps(item, sort_keys=True)) for item in recommendations],
+                [(str(item["id"]), analysis_id, json.dumps(item, sort_keys=True)) for item in scoped_recommendations],
             )
             connection.execute(
                 "UPDATE analysis_runs SET limitations_json = ? WHERE id = ? AND workspace_id = ?",

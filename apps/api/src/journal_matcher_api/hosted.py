@@ -28,7 +28,7 @@ from journal_matcher_api.journal_research import (
     merge_profile_memory,
     validate_claim,
 )
-from journal_matcher_api.manuscript_analysis import Decision, now_iso, stable_id
+from journal_matcher_api.manuscript_analysis import Decision, now_iso, scope_analysis_records, stable_id
 
 
 @dataclass(frozen=True)
@@ -895,6 +895,8 @@ class HostedAnalysisRepository:
         limitations: list[str],
     ) -> dict[str, object]:
         analysis_id = stable_id(principal.workspace_id, project_id, profile_version_id, manuscript_hash)
+        scoped_rules = scope_analysis_records(analysis_id, "guide-rule", rules)
+        scoped_recommendations = scope_analysis_records(analysis_id, "recommendation", recommendations)
         existing = require_rows(
             self.client.table(
                 "analysis_runs",
@@ -921,22 +923,27 @@ class HostedAnalysisRepository:
                     "status": "review",
                     "created_at": now_iso(),
                 },
+                prefer="resolution=ignore-duplicates",
             )
-            if rules:
-                self.client.table(
-                    "guide_rules",
-                    method="POST",
-                    payload=[{"id": str(rule["id"]), "analysis_id": analysis_id, "rule_json": rule} for rule in rules],
-                )
-            if recommendations:
-                self.client.table(
-                    "recommendations",
-                    method="POST",
-                    payload=[
-                        {"id": str(item["id"]), "analysis_id": analysis_id, "recommendation_json": item}
-                        for item in recommendations
-                    ],
-                )
+        if scoped_rules:
+            self.client.table(
+                "guide_rules",
+                method="POST",
+                payload=[
+                    {"id": str(rule["id"]), "analysis_id": analysis_id, "rule_json": rule} for rule in scoped_rules
+                ],
+                prefer="resolution=ignore-duplicates",
+            )
+        if scoped_recommendations:
+            self.client.table(
+                "recommendations",
+                method="POST",
+                payload=[
+                    {"id": str(item["id"]), "analysis_id": analysis_id, "recommendation_json": item}
+                    for item in scoped_recommendations
+                ],
+                prefer="resolution=ignore-duplicates",
+            )
         return self.get(principal, analysis_id)
 
     def get(self, principal: Principal, analysis_id: str) -> dict[str, object]:
@@ -1038,13 +1045,14 @@ class HostedAnalysisRepository:
         previous = analysis["limitations"]
         if not isinstance(previous, list):
             raise HTTPException(status_code=500, detail="Stored analysis limitations are invalid")
-        if recommendations:
+        scoped_recommendations = scope_analysis_records(analysis_id, "recommendation", recommendations)
+        if scoped_recommendations:
             self.client.table(
                 "recommendations",
                 method="POST",
                 payload=[
                     {"id": str(item["id"]), "analysis_id": analysis_id, "recommendation_json": item}
-                    for item in recommendations
+                    for item in scoped_recommendations
                 ],
                 prefer="resolution=ignore-duplicates",
             )

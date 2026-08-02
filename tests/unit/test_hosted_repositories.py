@@ -9,6 +9,7 @@ from journal_matcher_api.hosted import (
     HostedJournalProfileRepository,
 )
 from journal_matcher_api.journal_research import make_evidence
+from journal_matcher_api.manuscript_analysis import stable_id
 
 WORKSPACE = "11111111-1111-4111-8111-111111111111"
 PRINCIPAL = Principal("pilot-user", WORKSPACE)
@@ -19,13 +20,14 @@ class ScriptedClient:
         self.responses = responses
         self.rpc_responses = rpc_responses or []
         self.calls: list[tuple[str, str]] = []
+        self.table_requests: list[tuple[str, str, dict[str, object]]] = []
         self.uploads: list[tuple[str, str]] = []
         self.deletions: list[tuple[str, list[str]]] = []
         self.rpcs: list[tuple[str, str]] = []
 
     def table(self, name: str, *, method: str = "GET", **kwargs: object) -> object:
-        del kwargs
         self.calls.append((name, method))
+        self.table_requests.append((name, method, kwargs))
         if not self.responses:
             raise AssertionError(f"Unexpected table call: {name} {method}")
         response = self.responses.pop(0)
@@ -260,6 +262,10 @@ def test_analysis_create_get_review_and_decision() -> None:
         "scientificImpact": False,
         "decision": "pending",
     }
+    scoped_recommendation = {
+        **recommendation,
+        "id": stable_id(str(run_row()["id"]), "recommendation", recommendation["id"]),
+    }
     responses: list[object] = [
         [],
         None,
@@ -267,14 +273,14 @@ def test_analysis_create_get_review_and_decision() -> None:
         *analysis_get_responses(),
         None,
         None,
-        *analysis_get_responses([recommendation]),
-        *analysis_get_responses([recommendation]),
+        *analysis_get_responses([scoped_recommendation]),
+        *analysis_get_responses([scoped_recommendation]),
         None,
         *analysis_get_responses(
-            [recommendation],
+            [scoped_recommendation],
             [
                 {
-                    "recommendation_id": "recommendation-1",
+                    "recommendation_id": scoped_recommendation["id"],
                     "decision": "modified",
                     "modified_text": "new",
                     "created_at": "now",
@@ -286,10 +292,54 @@ def test_analysis_create_get_review_and_decision() -> None:
     repository = HostedAnalysisRepository(client)  # type: ignore[arg-type]
     created = repository.create(PRINCIPAL, str(project_row()["id"]), "profile", "sha256:x", {}, [], [], [])
     reviewed = repository.add_ai_review(PRINCIPAL, str(created["id"]), [recommendation], ["expert review"])
-    decided = repository.decide(PRINCIPAL, str(created["id"]), "recommendation-1", "modified", "new")
+    decided = repository.decide(PRINCIPAL, str(created["id"]), str(scoped_recommendation["id"]), "modified", "new")
 
     assert reviewed["id"] == created["id"]
     assert decided["recommendations"][0]["decision"] == "modified"  # type: ignore[index]
+
+
+def test_analysis_create_repairs_partial_run_with_analysis_scoped_children() -> None:
+    project_id = str(project_row()["id"])
+    analysis_id = stable_id(WORKSPACE, project_id, "profile", "sha256:x")
+    rule = {"id": "shared-rule", "key": "article-word-limit"}
+    recommendation = {"id": "shared-recommendation", "decision": "pending"}
+    scoped_rule = {**rule, "id": stable_id(analysis_id, "guide-rule", rule["id"])}
+    scoped_recommendation = {
+        **recommendation,
+        "id": stable_id(analysis_id, "recommendation", recommendation["id"]),
+    }
+    stored_run = {**run_row(), "id": analysis_id}
+    client = ScriptedClient(
+        [
+            [{"id": analysis_id}],
+            None,
+            None,
+            [stored_run],
+            [{"rule_json": scoped_rule}],
+            [{"id": scoped_recommendation["id"], "recommendation_json": scoped_recommendation}],
+            [],
+            [],
+        ]
+    )
+    repository = HostedAnalysisRepository(client)  # type: ignore[arg-type]
+
+    repaired = repository.create(
+        PRINCIPAL,
+        project_id,
+        "profile",
+        "sha256:x",
+        {},
+        [rule],
+        [recommendation],
+        [],
+    )
+
+    assert repaired["rules"] == [scoped_rule]
+    assert repaired["recommendations"] == [scoped_recommendation]
+    assert ("analysis_runs", "POST") not in client.calls
+    child_requests = [request for request in client.table_requests if request[1] == "POST"]
+    assert [request[0] for request in child_requests] == ["guide_rules", "recommendations"]
+    assert all(request[2]["prefer"] == "resolution=ignore-duplicates" for request in child_requests)
 
 
 def test_analysis_artifact_storage_and_lookup() -> None:
