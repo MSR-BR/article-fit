@@ -1,6 +1,6 @@
 # Change 014 — Real progress and error observability
 
-Status: `approved — implementation in progress`
+Status: `complete`
 
 ## Objective
 
@@ -49,6 +49,6 @@ Make long analyses understandable and trustworthy by reporting approximate progr
 - [x] Root causes identified from Vercel, Cloud Run, job, and analysis evidence.
 - [x] UI progress, terminal-state, error explanation, and asynchronous ID fixes implemented locally.
 - [x] Worker milestones and bounded temporary error detail implemented locally.
-- [ ] Migration applied to the existing Supabase project.
-- [ ] Full automated gates pass.
-- [ ] CPD and hosted smoke completed.
+- [x] Migration applied to the existing Supabase project.
+- [x] Full automated gates pass.
+- [x] CPD and hosted smoke completed.

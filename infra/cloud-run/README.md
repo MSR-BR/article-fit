@@ -22,7 +22,7 @@ server environment variables. The service-role key must never use a `NEXT_PUBLIC
 
 ## Release gate
 
-Do not apply these manifests until migration `0007`, hosted repository parity, queue recovery, ephemeral
+Do not apply these manifests until migration `0008`, hosted repository parity, queue recovery, ephemeral
 isolation, artifact download, deletion, and synthetic end-to-end tests pass.
 
 ## Open MVP and retention
@@ -34,11 +34,11 @@ isolation, artifact download, deletion, and synthetic end-to-end tests pass.
 
 ## Verified pilot deployment
 
-- API: `https://article-fit-api-xstipge7eq-ue.a.run.app`, revision `article-fit-api-00005-7tf` at 100% traffic.
-- Worker: Cloud Run Job `article-fit-worker`, image tag `c13-20260802-1`; health execution `article-fit-worker-rmgmr` completed successfully.
+- API: `https://article-fit-api-xstipge7eq-ue.a.run.app`, revision `article-fit-api-00011-ver` at 100% traffic.
+- Worker: Cloud Run Job `article-fit-worker`, image tag `c14-20260802-1`; health execution `article-fit-worker-kqlrn` completed successfully.
 - Retention: Cloud Run Job `article-fit-retention`; manual execution `article-fit-retention-h5tnh` and scheduled execution `article-fit-retention-2bf8j` completed successfully.
 - Scheduler: `article-fit-retention-hourly`, enabled in `us-east1`, schedule `17 * * * *`, timezone `America/Sao_Paulo`.
-- Frontend: `https://article-fit.vercel.app`, production deployment `dpl_FxJWgLaw3dgUNfPSonUCATWZqNVC`.
+- Frontend: `https://article-fit.vercel.app`, production deployment `dpl_GhpZFtCFsz6rAuR38U3Wjvqmteim`.
 - API service scaling: minimum zero (default), maximum one, concurrency four, timeout 300 seconds.
-- Rollback target: retained API revision `article-fit-api-00004-hl2`.
+- Rollback target: retained C13 API revision `article-fit-api-00005-7tf`.
 - Access: the public MVP has no end-user login; Vercel supplies the server-only credential and direct unauthenticated API access remains blocked.
