@@ -28,9 +28,19 @@ export function SignIn({
     });
     setBusy(false);
     if (error) {
-      setMessage(
-        'Não foi possível enviar o link. Confirme se este e-mail foi convidado.',
-      );
+      if (error.code === 'over_email_send_rate_limit') {
+        setMessage(
+          'O limite temporário de e-mails do Supabase foi atingido. Aguarde uma hora desde os últimos envios e tente novamente.',
+        );
+      } else if (error.code === 'over_request_rate_limit') {
+        setMessage(
+          'Foram feitas muitas tentativas em pouco tempo. Aguarde alguns minutos e tente novamente.',
+        );
+      } else {
+        setMessage(
+          'Não foi possível enviar o link. Confirme se este e-mail foi convidado.',
+        );
+      }
       return;
     }
     setLinkSent(true);

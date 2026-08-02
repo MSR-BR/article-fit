@@ -72,6 +72,34 @@ describe('SignIn', () => {
     );
   });
 
+  it('explains the temporary email quota instead of blaming the invitation', async () => {
+    signInWithOtp.mockResolvedValue({
+      error: { code: 'over_email_send_rate_limit' },
+    });
+    render(<SignIn onSignedIn={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('E-mail'), {
+      target: { value: 'pilot@example.com' },
+    });
+    fireEvent.submit(screen.getByLabelText('E-mail').closest('form')!);
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'limite temporário de e-mails',
+    );
+  });
+
+  it('explains a burst of requests separately from the email quota', async () => {
+    signInWithOtp.mockResolvedValue({
+      error: { code: 'over_request_rate_limit' },
+    });
+    render(<SignIn onSignedIn={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('E-mail'), {
+      target: { value: 'pilot@example.com' },
+    });
+    fireEvent.submit(screen.getByLabelText('E-mail').closest('form')!);
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'muitas tentativas em pouco tempo',
+    );
+  });
+
   it('handles an unconfirmed link and allows changing the email', async () => {
     signInWithOtp.mockResolvedValue({ error: null });
     getUser.mockResolvedValue({

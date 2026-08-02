@@ -33,6 +33,8 @@ The first owner email delivered Supabase's hosted magic link rather than the num
 
 The first corrective deployment still initiated the link through `@supabase/ssr`, whose browser client forces PKCE. Supabase documents that a PKCE callback can only be exchanged in the same browser and device where it began because the locally stored verifier is required. Email applications may open the link in another browser context, reproducing the access gate without a server error. The link request now uses a non-persistent, client-only implicit-flow client; the returned tokens are accepted by the existing browser session client, removed from the URL, stored in cookies, and independently revalidated by the Vercel proxy and Python API.
 
+The first production retest of the cross-browser flow was blocked before delivery by Supabase Auth with HTTP 429, code `over_email_send_rate_limit`. The default SMTP quota had been exhausted by the preceding diagnostic attempts. The sign-in UI now distinguishes this temporary quota from an unprovisioned email and from the short request-burst limit. A fresh delivered link remains required to close the hosted regression.
+
 ## Deployment evidence
 
 - Commit: `c917151` on `agent/article-fit-pilot`, pushed to `origin`.
