@@ -10,6 +10,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from functools import lru_cache
+from hashlib import sha256
 from pathlib import Path
 from typing import Annotated, Literal, cast
 from urllib.error import HTTPError, URLError
@@ -32,7 +33,11 @@ from journal_matcher_api.gemini import (
     GeminiConfigurationError,
     GeminiEditorialClient,
     GeminiProviderError,
+    build_coverage_repair_prompt,
     build_editorial_prompt,
+    build_feedback_prompt,
+    build_journal_memory_prompt,
+    memory_insights_as_claims,
     proposals_as_recommendations,
     validate_scientific_coverage,
 )
@@ -45,6 +50,7 @@ from journal_matcher_api.hosted import (
 )
 from journal_matcher_api.journal_research import (
     ArticleCandidate,
+    Evidence,
     JournalProfileRepository,
     PoliteHttpClient,
     derive_profile,
@@ -119,6 +125,10 @@ class ResearchStarterRequest(BaseModel):
 class DecisionRequest(BaseModel):
     decision: Literal["accepted", "rejected", "modified"]
     modified_text: str | None = Field(alias="modifiedText", default=None, max_length=20_000)
+
+
+class ArtifactFeedbackRequest(BaseModel):
+    comment: str = Field(min_length=10, max_length=4_000)
 
 
 class WorkflowRequest(BaseModel):
@@ -635,6 +645,32 @@ async def _research_journal(
         )
     claims, derivation_limitations = derive_profile(evidence)
     limitations.extend(item for item in derivation_limitations if item not in limitations)
+    repository = profile_repository(store)
+    repository.migrate()
+    if not limitations and os.getenv("GEMINI_API_KEY"):
+        previous = repository.current(str(journal["issn"]))
+        memory_prompt, memory_source_ids = build_journal_memory_prompt(
+            journal_title=str(journal["title"]),
+            current_claims=(cast(list[dict[str, object]], previous["claims"]) if previous else []),
+            evidence=[
+                {"sourceId": item.source_id, "sourceType": item.source_type, "text": item.content}
+                for item in evidence
+                if item.source_type == "article"
+            ],
+        )
+        try:
+            memory_result = GeminiEditorialClient().synthesize_memory(memory_prompt)
+            claims.extend(
+                memory_insights_as_claims(
+                    memory_result.response,
+                    allowed_source_ids=memory_source_ids,
+                )
+            )
+            warnings.extend(memory_result.response.limitations)
+        except GeminiConfigurationError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from None
+        except GeminiProviderError as error:
+            raise HTTPException(status_code=502, detail=str(error)) from None
     result: dict[str, object] = {
         "status": "degraded" if limitations else "complete",
         "selectedArticles": [
@@ -660,8 +696,6 @@ async def _research_journal(
         "profileVersion": None,
     }
     if not limitations:
-        repository = profile_repository(store)
-        repository.migrate()
         result["profileVersion"] = repository.publish(
             str(journal["issn"]), evidence, claims, limitations, payload.expected_profile_version
         )
@@ -890,8 +924,13 @@ async def create_ai_review(
         reference_article_texts=store.reference_texts(principal, str(analysis["projectId"])),
     )
     try:
-        result = GeminiEditorialClient().generate(prompt)
-        validate_scientific_coverage(result.response)
+        client = GeminiEditorialClient()
+        result = client.generate(prompt)
+        try:
+            validate_scientific_coverage(result.response)
+        except GeminiProviderError:
+            result = client.generate(build_coverage_repair_prompt(prompt, result.response))
+            validate_scientific_coverage(result.response)
         recommendations = proposals_as_recommendations(
             result.response,
             profile_version_id=str(analysis["profileVersionId"]),
@@ -1034,6 +1073,113 @@ async def download_artifact(
         media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{kind}"'},
     )
+
+
+@app.post("/v1/analyses/{analysis_id}/artifacts/{kind}/feedback", tags=["artifacts"])
+async def submit_artifact_feedback(
+    analysis_id: str,
+    kind: str,
+    payload: ArtifactFeedbackRequest,
+    principal: PrincipalDependency,
+    store: StoreDependency,
+) -> dict[str, object]:
+    """Generalize artifact feedback into advisory journal memory without storing the raw comment."""
+    if kind not in {"revision-report.pdf", "revised-manuscript.docx", "revised-manuscript.pdf"}:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    analyses = analysis_repository(store)
+    analyses.migrate()
+    analyses.artifact_key(principal, analysis_id, kind)
+    analysis = analyses.get(principal, analysis_id)
+    profiles = profile_repository(store)
+    profiles.migrate()
+    analysis_profile = profiles.get(str(analysis["profileVersionId"]))
+    journal_issn = str(analysis_profile["journalIssn"])
+    current = profiles.current(journal_issn) or analysis_profile
+    project = store.get_project(principal, str(analysis["projectId"]))
+    journal = project.get("journal")
+    journal_title = str(journal.get("title")) if isinstance(journal, dict) else journal_issn
+    prompt = build_feedback_prompt(
+        journal_title=journal_title,
+        artifact_kind=kind,
+        comment=payload.comment,
+        profile_claims=cast(list[dict[str, object]], current["claims"]),
+        optimization_count=cast(int, current["optimizationCount"]),
+    )
+    try:
+        result = GeminiEditorialClient().analyze_feedback(prompt)
+    except GeminiConfigurationError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from None
+    except GeminiProviderError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from None
+    lesson = result.response
+    if not lesson.actionable:
+        store.audit(
+            principal,
+            "artifact.feedback.reviewed",
+            "analysis",
+            analysis_id,
+            {"artifactKind": kind, "applied": "false", "model": result.model},
+        )
+        return {
+            "applied": False,
+            "message": "Thank you. No reusable journal or deliverable lesson was identified in this comment.",
+            "optimizationCount": current["optimizationCount"],
+            "feedbackCount": current["feedbackCount"],
+        }
+
+    comment_digest = sha256(payload.comment.encode()).hexdigest()
+    source_id = sha256(f"{journal_issn}|{kind}|{comment_digest}".encode()).hexdigest()[:32]
+    evidence = Evidence(
+        source_id=source_id,
+        source_type="user-feedback",
+        canonical_url=None,
+        title="Derived artifact feedback",
+        identifier=None,
+        published_at=None,
+        retrieved_at=datetime.now(UTC).isoformat(),
+        content_hash=f"sha256:{comment_digest}",
+        locator=f"artifact:{kind}",
+        access_status="derived-advisory",
+        content=payload.comment,
+    )
+    claim = {
+        "key": f"feedback:{kind}:{lesson.category}",
+        "claimClass": "feedback-informed advisory",
+        "summary": lesson.lesson,
+        "sourceIds": [source_id],
+        "locator": f"artifact:{kind}",
+        "coverage": "1 reviewed feedback cycle",
+        "confidence": 0.6,
+        "basis": "user-feedback",
+        "appliesTo": lesson.applies_to,
+        "rationale": lesson.rationale,
+        "limitations": lesson.limitations,
+    }
+    updated: dict[str, object] | None = None
+    for attempt in range(2):
+        expected_version = profiles.current_version(journal_issn)
+        try:
+            updated = profiles.publish(journal_issn, [evidence], [claim], [], expected_version)
+            break
+        except HTTPException as error:
+            if error.status_code != 409 or attempt == 1:
+                raise
+    if updated is None:  # pragma: no cover - guarded by publish or exception
+        raise HTTPException(status_code=409, detail="Journal memory was updated concurrently")
+    store.audit(
+        principal,
+        "artifact.feedback.learned",
+        "journal-profile",
+        str(updated["id"]),
+        {"artifactKind": kind, "category": lesson.category, "model": result.model},
+    )
+    return {
+        "applied": True,
+        "message": "Feedback analyzed and incorporated as advisory guidance for future outputs.",
+        "lesson": lesson.lesson,
+        "optimizationCount": updated["optimizationCount"],
+        "feedbackCount": updated["feedbackCount"],
+    }
 
 
 @app.delete("/v1/projects/{project_id}", status_code=204, tags=["projects"])

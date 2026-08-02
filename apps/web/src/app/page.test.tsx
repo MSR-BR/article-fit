@@ -146,6 +146,55 @@ describe('HomePage', () => {
     });
   });
 
+  it('submits independent feedback for a generated artifact', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ id: 'project-feedback' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'reference-1' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'reference-2' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'reference-3' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'manuscript' }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          analysisId: 'analysis-feedback',
+          artifacts: [{ kind: 'revision-report.pdf' }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          applied: true,
+          message:
+            'Feedback analyzed and incorporated as advisory guidance for future outputs.',
+          optimizationCount: 3,
+          feedbackCount: 1,
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    render(<HomePage />);
+    completePackage();
+    fireEvent.click(screen.getByRole('button', { name: 'Start analysis' }));
+
+    await screen.findByRole('link', { name: /Submission-fit report/ });
+    const field = screen.getByLabelText('Feedback on this file');
+    fireEvent.change(field, {
+      target: {
+        value:
+          'The report should include more concrete scientific validation actions.',
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send feedback' }));
+
+    expect(
+      await screen.findByText(
+        /Journal memory: 3 optimization cycles, 1 feedback lesson/,
+      ),
+    ).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      '/api/journal-matcher/analyses/analysis-feedback/artifacts/revision-report.pdf/feedback',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
   it('uses the latest analysis id after an asynchronous job succeeds', async () => {
     const fetchMock = vi
       .fn()
@@ -316,6 +365,36 @@ describe('HomePage', () => {
     expect(
       screen.getByText(/Estimated milestone completion: 25%/),
     ).toBeInTheDocument();
+  });
+
+  it('keeps confirmed progress and reconnects after a polling interruption', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ id: 'project-reconnect' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'reference-1' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'reference-2' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'reference-3' }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'manuscript' }))
+      .mockResolvedValueOnce(
+        jsonResponse({ id: 'job-reconnect', state: 'queued' }),
+      )
+      .mockRejectedValueOnce(new TypeError('Network connection lost'));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<HomePage />);
+    completePackage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start analysis' }));
+
+    expect(
+      await screen.findByText(
+        /Reconnecting to receive the latest confirmed status/,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('progressbar')).toHaveAttribute(
+      'aria-valuenow',
+      '25',
+    );
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('cancels a created job and stops the visible analysis', async () => {

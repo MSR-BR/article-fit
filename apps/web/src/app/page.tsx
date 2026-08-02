@@ -88,6 +88,11 @@ type JobStatus = {
   errorDetail?: string | null;
 };
 
+type FeedbackStatus = {
+  state: 'idle' | 'submitting' | 'complete' | 'error';
+  message?: string;
+};
+
 function stageIndex(progress: number, backendStage?: string) {
   const exact = progressStages.findIndex((stage) => stage.key === backendStage);
   if (exact >= 0) return exact;
@@ -179,12 +184,19 @@ export default function HomePage() {
   const [error, setError] = useState('');
   const [analysisId, setAnalysisId] = useState('');
   const [artifacts, setArtifacts] = useState<string[]>([]);
+  const [feedback, setFeedback] = useState<Record<string, string>>({});
+  const [feedbackStatus, setFeedbackStatus] = useState<
+    Record<string, FeedbackStatus>
+  >({});
+  const [reconnecting, setReconnecting] = useState(false);
   const [guidance, setGuidance] = useState(emptyGuidance);
   const [inputVersion, setInputVersion] = useState(0);
   const runContext = useRef<RunContext | null>(null);
   const stopRequested = useRef(false);
 
-  const activityMessage = progressStages[activeStep]?.message ?? '';
+  const activityMessage = reconnecting
+    ? 'The server is still processing. Reconnecting to receive the latest confirmed status.'
+    : (progressStages[activeStep]?.message ?? '');
 
   const assistedValues = Object.values(guidance).map((value) => value.trim());
   const officialUrlsReady = sameOfficialDomain(
@@ -239,6 +251,9 @@ export default function HomePage() {
     setShowProgress(true);
     setError('');
     setArtifacts([]);
+    setFeedback({});
+    setFeedbackStatus({});
+    setReconnecting(false);
     try {
       const project = await api<{ id: string }>('/projects', {
         method: 'POST',
@@ -295,10 +310,33 @@ export default function HomePage() {
       let workflow = initiated;
       if (!workflow.analysisId && workflow.id) {
         context.jobId = workflow.id;
+        let connectionFailures = 0;
         for (let attempt = 0; attempt < 300; attempt += 1) {
-          const job = await api<JobStatus>(`/jobs/${workflow.id}`, {
-            signal: context.controller.signal,
-          });
+          let job: JobStatus;
+          try {
+            job = await api<JobStatus>(`/jobs/${workflow.id}`, {
+              signal: context.controller.signal,
+            });
+            connectionFailures = 0;
+            setReconnecting(false);
+          } catch (pollError) {
+            if (
+              context.controller.signal.aborted ||
+              (pollError instanceof DOMException &&
+                pollError.name === 'AbortError')
+            ) {
+              throw pollError;
+            }
+            connectionFailures += 1;
+            setReconnecting(true);
+            if (connectionFailures >= 30) {
+              throw new Error(
+                'The connection could not be restored. The server may still be processing; wait a moment and try again.',
+              );
+            }
+            await new Promise((resolve) => window.setTimeout(resolve, 2000));
+            continue;
+          }
           setOverallProgress((current) => Math.max(current, job.progress));
           setActiveStep((current) =>
             Math.max(current, stageIndex(job.progress, job.stage)),
@@ -334,6 +372,7 @@ export default function HomePage() {
       setRunState('succeeded');
       setStarted(false);
       setShowProgress(false);
+      setReconnecting(false);
     } catch (caught) {
       if (stopRequested.current) return;
       setError(
@@ -343,6 +382,7 @@ export default function HomePage() {
       );
       setRunState('failed');
       setStarted(false);
+      setReconnecting(false);
     } finally {
       if (runContext.current === context) runContext.current = null;
     }
@@ -385,6 +425,9 @@ export default function HomePage() {
     setError('');
     setAnalysisId('');
     setArtifacts([]);
+    setFeedback({});
+    setFeedbackStatus({});
+    setReconnecting(false);
     setInputVersion((current) => current + 1);
   }
 
@@ -406,6 +449,46 @@ export default function HomePage() {
       ...current,
       manuscript,
     }));
+  }
+
+  async function submitFeedback(kind: string) {
+    const comment = feedback[kind]?.trim() ?? '';
+    if (!analysisId || comment.length < 10) return;
+    setFeedbackStatus((current) => ({
+      ...current,
+      [kind]: { state: 'submitting', message: 'Analyzing feedback…' },
+    }));
+    try {
+      const result = await api<{
+        applied: boolean;
+        message: string;
+        optimizationCount: number;
+        feedbackCount: number;
+      }>(`/analyses/${analysisId}/artifacts/${kind}/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ comment }),
+      });
+      setFeedbackStatus((current) => ({
+        ...current,
+        [kind]: {
+          state: 'complete',
+          message: `${result.message} Journal memory: ${result.optimizationCount} optimization cycle${result.optimizationCount === 1 ? '' : 's'}, ${result.feedbackCount} feedback lesson${result.feedbackCount === 1 ? '' : 's'}.`,
+        },
+      }));
+      setFeedback((current) => ({ ...current, [kind]: '' }));
+    } catch (feedbackError) {
+      setFeedbackStatus((current) => ({
+        ...current,
+        [kind]: {
+          state: 'error',
+          message:
+            feedbackError instanceof Error
+              ? feedbackError.message
+              : 'Feedback could not be analyzed. Try again shortly.',
+        },
+      }));
+    }
   }
 
   return (
@@ -776,16 +859,57 @@ export default function HomePage() {
         </p>
         {artifacts.length > 0 && (
           <div className="result-grid">
-            {artifacts.map((kind) => (
-              <a
-                key={kind}
-                href={`/api/journal-matcher/analyses/${analysisId}/artifacts/${kind}`}
-                download
-              >
-                <span>{artifactLabels[kind] ?? kind}</span>
-                <small>Download file</small>
-              </a>
-            ))}
+            {artifacts.map((kind) => {
+              const status = feedbackStatus[kind] ?? { state: 'idle' };
+              const fieldId = `feedback-${kind.replaceAll('.', '-')}`;
+              return (
+                <article key={kind} className="result-card">
+                  <a
+                    className="result-download"
+                    href={`/api/journal-matcher/analyses/${analysisId}/artifacts/${kind}`}
+                    download
+                  >
+                    <span>{artifactLabels[kind] ?? kind}</span>
+                    <small>Download file</small>
+                  </a>
+                  <div className="artifact-feedback">
+                    <label htmlFor={fieldId}>Feedback on this file</label>
+                    <textarea
+                      id={fieldId}
+                      value={feedback[kind] ?? ''}
+                      maxLength={4000}
+                      placeholder="What should be improved in this deliverable?"
+                      onChange={(event) =>
+                        setFeedback((current) => ({
+                          ...current,
+                          [kind]: event.target.value,
+                        }))
+                      }
+                    />
+                    <button
+                      type="button"
+                      disabled={
+                        (feedback[kind]?.trim().length ?? 0) < 10 ||
+                        status.state === 'submitting'
+                      }
+                      onClick={() => void submitFeedback(kind)}
+                    >
+                      {status.state === 'submitting'
+                        ? 'Analyzing…'
+                        : 'Send feedback'}
+                    </button>
+                    {status.message && (
+                      <small
+                        className={`feedback-message ${status.state}`}
+                        role={status.state === 'error' ? 'alert' : 'status'}
+                      >
+                        {status.message}
+                      </small>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
           </div>
         )}
       </section>

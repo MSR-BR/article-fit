@@ -830,6 +830,15 @@ class HostedJournalProfileRepository:
         )
         return int(rows[0]["version"]) if rows else 0
 
+    def current(self, journal_issn: str) -> dict[str, object] | None:
+        rows = require_rows(
+            self.client.table(
+                "journal_profile_heads",
+                query={"select": "version_id", "journal_issn": f"eq.{journal_issn}", "limit": "1"},
+            )
+        )
+        return self.get(str(rows[0]["version_id"])) if rows else None
+
     def delete_snapshots(self, version_id: str) -> None:
         self.client.table(
             "journal_source_snapshots",
@@ -861,13 +870,21 @@ class HostedJournalProfileRepository:
         if not rows:
             raise HTTPException(status_code=404, detail="Journal profile version not found")
         row = rows[0]
+        evidence = row["evidence_json"]
+        feedback_count = (
+            sum(1 for item in evidence if isinstance(item, dict) and item.get("source_type") == "user-feedback")
+            if isinstance(evidence, list)
+            else 0
+        )
         return {
             "id": row["id"],
             "journalIssn": row["journal_issn"],
             "version": row["version"],
+            "optimizationCount": row["version"],
+            "feedbackCount": feedback_count,
             "status": row["status"],
             "claims": row["claims_json"],
-            "evidence": row["evidence_json"],
+            "evidence": evidence,
             "limitations": row["limitations_json"],
             "createdAt": row["created_at"],
             "supersedesId": row.get("supersedes_id"),

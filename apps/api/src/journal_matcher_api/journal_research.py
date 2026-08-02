@@ -447,6 +447,13 @@ class JournalProfileRepository:
             ).fetchone()
         return int(row[0]) if row else 0
 
+    def current(self, journal_issn: str) -> dict[str, object] | None:
+        with closing(sqlite3.connect(self.database_path)) as connection:
+            row = connection.execute(
+                "SELECT version_id FROM journal_profile_heads WHERE journal_issn = ?", (journal_issn,)
+            ).fetchone()
+        return self.get(str(row[0])) if row else None
+
     def delete_snapshots(self, version_id: str) -> None:
         with closing(sqlite3.connect(self.database_path)) as connection, connection:
             connection.execute("DELETE FROM journal_source_snapshots WHERE profile_version_id = ?", (version_id,))
@@ -468,13 +475,19 @@ class JournalProfileRepository:
             row = connection.execute("SELECT * FROM journal_profile_versions WHERE id = ?", (version_id,)).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="Journal profile version not found")
+        evidence = json.loads(row["evidence_json"])
+        feedback_count = sum(
+            1 for item in evidence if isinstance(item, dict) and item.get("source_type") == "user-feedback"
+        )
         return {
             "id": row["id"],
             "journalIssn": row["journal_issn"],
             "version": row["version"],
+            "optimizationCount": row["version"],
+            "feedbackCount": feedback_count,
             "status": row["status"],
             "claims": json.loads(row["claims_json"]),
-            "evidence": json.loads(row["evidence_json"]),
+            "evidence": evidence,
             "limitations": json.loads(row["limitations_json"]),
             "createdAt": row["created_at"],
             "supersedesId": row["supersedes_id"],
