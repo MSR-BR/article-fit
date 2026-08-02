@@ -1,6 +1,15 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import HomePage from './page';
+
+const { getUser, signOut } = vi.hoisted(() => ({
+  getUser: vi.fn(),
+  signOut: vi.fn(),
+}));
+
+vi.mock('../lib/supabase/client', () => ({
+  createClient: () => ({ auth: { getUser, signOut } }),
+}));
 
 function jsonResponse(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
@@ -15,7 +24,12 @@ function completePackage() {
   });
   fireEvent.change(screen.getByLabelText('Selecionar artigos'), {
     target: {
-      files: [1, 2, 3].map((index) => new File(['pdf'], `referencia-${index}.pdf`, { type: 'application/pdf' })),
+      files: [1, 2, 3].map(
+        (index) =>
+          new File(['pdf'], `referencia-${index}.pdf`, {
+            type: 'application/pdf',
+          }),
+      ),
     },
   });
   fireEvent.change(screen.getByLabelText('Selecionar manuscrito'), {
@@ -30,16 +44,53 @@ function completePackage() {
 }
 
 describe('HomePage', () => {
+  beforeEach(() => {
+    getUser.mockReset();
+    signOut.mockReset();
+    getUser.mockResolvedValue({
+      data: { user: { email: 'pilot@example.com' } },
+    });
+    signOut.mockResolvedValue({ error: null });
+  });
   afterEach(() => vi.unstubAllGlobals());
-  it('shows only the two document inputs and the concise explanation', () => {
-    render(<HomePage />);
 
-    expect(screen.getByRole('heading', { name: 'Do rascunho à submissão.' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Selecionar artigos')).toHaveAttribute('multiple');
-    expect(screen.getByLabelText('Selecionar manuscrito')).not.toHaveAttribute('multiple');
+  it('blocks the upload interface until a named session is verified', async () => {
+    getUser.mockResolvedValue({ data: { user: null } });
+    render(<HomePage />);
+    expect(screen.getByRole('status')).toHaveTextContent('Verificando acesso');
+    expect(
+      await screen.findByRole('heading', { name: 'Acesso ao Article Fit' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText('Revista-alvo')).not.toBeInTheDocument();
+  });
+
+  it('signs out and returns to the invitation gate', async () => {
+    render(<HomePage initialUserEmail="pilot@example.com" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Sair' }));
+    expect(
+      await screen.findByRole('heading', { name: 'Acesso ao Article Fit' }),
+    ).toBeInTheDocument();
+    expect(signOut).toHaveBeenCalledOnce();
+  });
+  it('shows only the two document inputs and the concise explanation', () => {
+    render(<HomePage initialUserEmail="pilot@example.com" />);
+
+    expect(
+      screen.getByRole('heading', { name: 'Do rascunho à submissão.' }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('Selecionar artigos')).toHaveAttribute(
+      'multiple',
+    );
+    expect(screen.getByLabelText('Selecionar manuscrito')).not.toHaveAttribute(
+      'multiple',
+    );
     expect(screen.getByLabelText('Revista-alvo')).toBeRequired();
-    expect(screen.getByRole('button', { name: 'Iniciar análise' })).toBeDisabled();
-    expect(screen.getByRole('status')).toHaveTextContent('Informe a revista-alvo');
+    expect(
+      screen.getByRole('button', { name: 'Iniciar análise' }),
+    ).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Informe a revista-alvo',
+    );
   });
 
   it('runs the real API sequence and reveals only returned artifacts', async () => {
@@ -61,82 +112,144 @@ describe('HomePage', () => {
         }),
       );
     vi.stubGlobal('fetch', fetchMock);
-    render(<HomePage />);
+    render(<HomePage initialUserEmail="pilot@example.com" />);
     completePackage();
 
     const startButton = screen.getByRole('button', { name: 'Iniciar análise' });
     expect(startButton).toBeEnabled();
     fireEvent.click(startButton);
     expect(screen.getByRole('status')).toHaveTextContent('Análise iniciada');
-    expect(screen.getByRole('dialog', { name: 'Preparando seu artigo' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Preparando seu artigo' }).querySelector('.spinner')).toBeInTheDocument();
-    expect(screen.getByText('Criando o projeto').closest('li')).toHaveClass('active');
-    await waitFor(() => expect(screen.getByText('Arquivos prontos').closest('li')).toHaveClass('active'));
-    expect(screen.getByRole('link', { name: /Relatório de adequação/ })).toHaveAttribute(
+    expect(
+      screen.getByRole('dialog', { name: 'Preparando seu artigo' }),
+    ).toBeInTheDocument();
+    expect(
+      screen
+        .getByRole('heading', { name: 'Preparando seu artigo' })
+        .querySelector('.spinner'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Criando o projeto').closest('li')).toHaveClass(
+      'active',
+    );
+    await waitFor(() =>
+      expect(screen.getByText('Arquivos prontos').closest('li')).toHaveClass(
+        'active',
+      ),
+    );
+    expect(
+      screen.getByRole('link', { name: /Relatório de adequação/ }),
+    ).toHaveAttribute(
       'href',
       '/api/journal-matcher/analyses/analysis-1/artifacts/revision-report.pdf',
     );
-    expect(screen.getByRole('link', { name: /Artigo revisado \(Word\)/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: /Artigo revisado \(Word\)/ }),
+    ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(6);
   });
 
   it('asks for the remaining orientation articles', () => {
-    render(<HomePage />);
+    render(<HomePage initialUserEmail="pilot@example.com" />);
     fireEvent.change(screen.getByLabelText('Revista-alvo'), {
       target: { value: 'Physical Review Letters' },
     });
     fireEvent.change(screen.getByLabelText('Selecionar artigos'), {
-      target: { files: [new File(['pdf'], 'referencia.pdf', { type: 'application/pdf' })] },
+      target: {
+        files: [
+          new File(['pdf'], 'referencia.pdf', { type: 'application/pdf' }),
+        ],
+      },
     });
     expect(screen.getByRole('status')).toHaveTextContent('mais 2 artigos');
   });
 
   it('keeps analysis disabled until the target journal is informed', () => {
-    render(<HomePage />);
+    render(<HomePage initialUserEmail="pilot@example.com" />);
     const references = [1, 2, 3].map(
-      (index) => new File(['pdf'], `r-${index}.pdf`, { type: 'application/pdf' }),
+      (index) =>
+        new File(['pdf'], `r-${index}.pdf`, { type: 'application/pdf' }),
     );
-    fireEvent.change(screen.getByLabelText('Selecionar artigos'), { target: { files: references } });
-    fireEvent.change(screen.getByLabelText('Selecionar manuscrito'), {
-      target: { files: [new File(['draft'], 'artigo.pdf', { type: 'application/pdf' })] },
+    fireEvent.change(screen.getByLabelText('Selecionar artigos'), {
+      target: { files: references },
     });
-    expect(screen.getByRole('button', { name: 'Iniciar análise' })).toBeDisabled();
-    expect(screen.getByRole('status')).toHaveTextContent('Informe a revista-alvo');
+    fireEvent.change(screen.getByLabelText('Selecionar manuscrito'), {
+      target: {
+        files: [new File(['draft'], 'artigo.pdf', { type: 'application/pdf' })],
+      },
+    });
+    expect(
+      screen.getByRole('button', { name: 'Iniciar análise' }),
+    ).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Informe a revista-alvo',
+    );
   });
 
   it('does not simulate progress while the backend has not answered', async () => {
     let resolveProject!: (value: Response) => void;
-    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => { resolveProject = resolve; })));
-    render(<HomePage />);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveProject = resolve;
+          }),
+      ),
+    );
+    render(<HomePage initialUserEmail="pilot@example.com" />);
     completePackage();
     fireEvent.click(screen.getByRole('button', { name: 'Iniciar análise' }));
-    expect(screen.getByText('Criando o projeto').closest('li')).toHaveClass('active');
-    expect(screen.getByText('Enviando e validando os arquivos').closest('li')).not.toHaveClass('active');
-    expect(screen.queryByRole('link', { name: /Baixar/ })).not.toBeInTheDocument();
+    expect(screen.getByText('Criando o projeto').closest('li')).toHaveClass(
+      'active',
+    );
+    expect(
+      screen.getByText('Enviando e validando os arquivos').closest('li'),
+    ).not.toHaveClass('active');
+    expect(
+      screen.queryByRole('link', { name: /Baixar/ }),
+    ).not.toBeInTheDocument();
     resolveProject(jsonResponse({ id: 'project-1' }));
-    await waitFor(() => expect(screen.getByText('Enviando e validando os arquivos').closest('li')).toHaveClass('active'));
+    await waitFor(() =>
+      expect(
+        screen.getByText('Enviando e validando os arquivos').closest('li'),
+      ).toHaveClass('active'),
+    );
   });
 
   it('shows a recoverable backend error and enables another attempt', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(jsonResponse({ detail: 'Não foi possível confirmar a revista.' }, 422)),
+      vi
+        .fn()
+        .mockResolvedValue(
+          jsonResponse(
+            { detail: 'Não foi possível confirmar a revista.' },
+            422,
+          ),
+        ),
     );
-    render(<HomePage />);
+    render(<HomePage initialUserEmail="pilot@example.com" />);
     completePackage();
     fireEvent.click(screen.getByRole('button', { name: 'Iniciar análise' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Não foi possível confirmar a revista.');
-    expect(screen.getByRole('button', { name: 'Iniciar análise' })).toBeEnabled();
-    expect(screen.queryByRole('link', { name: /Baixar/ })).not.toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Não foi possível confirmar a revista.',
+    );
+    expect(
+      screen.getByRole('button', { name: 'Iniciar análise' }),
+    ).toBeEnabled();
+    expect(
+      screen.queryByRole('link', { name: /Baixar/ }),
+    ).not.toBeInTheDocument();
   });
 
   it('requires a complete assisted official-guidance package', () => {
-    render(<HomePage />);
+    render(<HomePage initialUserEmail="pilot@example.com" />);
     completePackage();
     fireEvent.change(screen.getByLabelText('URL oficial do escopo'), {
       target: { value: 'https://journals.aps.org/prl/about' },
     });
-    expect(screen.getByRole('button', { name: 'Iniciar análise' })).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Iniciar análise' }),
+    ).toBeDisabled();
     expect(screen.getByRole('status')).toHaveTextContent('Complete o pacote');
     fireEvent.change(screen.getByLabelText('URL oficial do guia dos autores'), {
       target: { value: 'https://journals.aps.org/prl/authors' },
@@ -147,6 +260,8 @@ describe('HomePage', () => {
     fireEvent.change(screen.getByLabelText('Texto do guia dos autores'), {
       target: { value: 'orientação oficial '.repeat(40) },
     });
-    expect(screen.getByRole('button', { name: 'Iniciar análise' })).toBeEnabled();
+    expect(
+      screen.getByRole('button', { name: 'Iniciar análise' }),
+    ).toBeEnabled();
   });
 });

@@ -7,25 +7,25 @@ The ordered migrations `0002` through `0006` were applied through the authentica
 
 ## Post-migration verification
 
-| Control | Observed result |
-| --- | --- |
-| Required application tables present | 13 |
-| Required tables missing RLS | 0 |
-| Private 25 MB Storage buckets | 2 |
-| Durable `analysis_jobs` queue | Present |
-| Queue API access | `service_role` allowed; `authenticated` denied |
-| Hosted adapter smoke test | Postgres, private Storage, and Queue passed |
-| Authenticated tenant isolation | Two temporary users saw only their own workspace |
-| Worker recovery | Claim, retry limit, terminal state, and acknowledgement passed |
-| Synthetic hosted workflow | Gemini review and four private artifacts passed |
-| Cloud Run API | Revision `article-fit-api-00001-psr`; health endpoint passed |
-| Cloud Run worker | Execution `article-fit-worker-2gb2f`; health-check passed without reading queue |
-| Vercel production | `dpl_DUPeDZd3jWp4XTv5185hBLJ3ziG6`; page 200 and authenticated proxy 404 passed |
-| Cloud Run rollback | Revision 2 → revision 1 → revision 2; health and proxy passed at each terminal state |
-| Retention by age | Scoped 31-day synthetic project and private object expired successfully |
-| `anon` grants on sampled private tables | 0 |
-| Supabase Security Advisor | 0 errors, 0 warnings, 0 suggestions |
-| Supabase Performance Advisor | 0 errors, 0 warnings, 17 informational suggestions |
+| Control                                 | Observed result                                                                      |
+| --------------------------------------- | ------------------------------------------------------------------------------------ |
+| Required application tables present     | 13                                                                                   |
+| Required tables missing RLS             | 0                                                                                    |
+| Private 25 MB Storage buckets           | 2                                                                                    |
+| Durable `analysis_jobs` queue           | Present                                                                              |
+| Queue API access                        | `service_role` allowed; `authenticated` denied                                       |
+| Hosted adapter smoke test               | Postgres, private Storage, and Queue passed                                          |
+| Authenticated tenant isolation          | Two temporary users saw only their own workspace                                     |
+| Worker recovery                         | Claim, retry limit, terminal state, and acknowledgement passed                       |
+| Synthetic hosted workflow               | Gemini review and four private artifacts passed                                      |
+| Cloud Run API                           | Revision `article-fit-api-00001-psr`; health endpoint passed                         |
+| Cloud Run worker                        | Execution `article-fit-worker-2gb2f`; health-check passed without reading queue      |
+| Vercel production                       | `dpl_DUPeDZd3jWp4XTv5185hBLJ3ziG6`; page 200 and authenticated proxy 404 passed      |
+| Cloud Run rollback                      | Revision 2 → revision 1 → revision 2; health and proxy passed at each terminal state |
+| Retention by age                        | Scoped 31-day synthetic project and private object expired successfully              |
+| `anon` grants on sampled private tables | 0                                                                                    |
+| Supabase Security Advisor               | 0 errors, 0 warnings, 0 suggestions                                                  |
+| Supabase Performance Advisor            | 0 errors, 0 warnings, 17 informational suggestions                                   |
 
 The verified buckets are `manuscripts` and `artifacts`; both are private. The migration grants authenticated read access only through workspace-membership predicates. Application writes and queue operations remain server-side.
 

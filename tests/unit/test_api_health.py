@@ -55,9 +55,7 @@ def test_worker_trigger_uses_metadata_token_without_logging_it(monkeypatch: pyte
 
 
 def test_worker_trigger_fails_closed_without_metadata_token(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(
-        "CLOUD_RUN_WORKER_RUN_URL", "https://run.googleapis.com/v2/projects/p/locations/r/jobs/w:run"
-    )
+    monkeypatch.setenv("CLOUD_RUN_WORKER_RUN_URL", "https://run.googleapis.com/v2/projects/p/locations/r/jobs/w:run")
     monkeypatch.setattr("journal_matcher_api.main.urlopen", lambda *args, **kwargs: FakeResponse(b"{}"))
     with pytest.raises(HTTPException, match="could not be started"):
         _trigger_cloud_run_worker()

@@ -13,6 +13,7 @@ from journal_matcher_api.hosted import (
     SupabaseSettings,
     require_rows,
 )
+from journal_matcher_api.main import authenticate
 
 
 class FakeResponse:
@@ -55,6 +56,55 @@ def test_table_request_keeps_service_key_in_headers(monkeypatch: pytest.MonkeyPa
     assert isinstance(headers, dict)
     assert headers["Authorization"] == "Bearer server-secret"
     assert headers["Apikey"] == "server-secret"
+
+
+def test_verify_user_uses_publishable_key_and_access_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_urlopen(request: object, timeout: float) -> FakeResponse:
+        captured["url"] = request.full_url  # type: ignore[attr-defined]
+        captured["headers"] = dict(request.headers)  # type: ignore[attr-defined]
+        captured["timeout"] = timeout
+        return FakeResponse(json.dumps({"id": "11111111-1111-4111-8111-111111111111"}).encode())
+
+    monkeypatch.setattr("journal_matcher_api.hosted.urlopen", fake_urlopen)
+    client = SupabaseHttpClient(SupabaseSettings("https://project.supabase.co", "server-secret", "publishable-key"))
+    assert client.verify_user("user-token")["id"] == "11111111-1111-4111-8111-111111111111"
+    assert captured["url"] == "https://project.supabase.co/auth/v1/user"
+    headers = captured["headers"]
+    assert isinstance(headers, dict)
+    assert headers["Apikey"] == "publishable-key"
+    assert headers["Authorization"] == "Bearer user-token"
+    assert "server-secret" not in str(headers)
+
+
+def test_verify_user_requires_hosted_auth_config_and_valid_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = SupabaseHttpClient(SupabaseSettings("https://project.supabase.co", "server-secret"))
+    with pytest.raises(HTTPException) as missing:
+        client.verify_user("token")
+    assert missing.value.status_code == 503
+
+    def unauthorized(request: object, timeout: float) -> FakeResponse:
+        del request, timeout
+        raise HTTPError("https://project.supabase.co/auth/v1/user", 401, "expired", {}, None)
+
+    monkeypatch.setattr("journal_matcher_api.hosted.urlopen", unauthorized)
+    configured = SupabaseHttpClient(SupabaseSettings("https://project.supabase.co", "server-secret", "publishable-key"))
+    with pytest.raises(HTTPException) as invalid:
+        configured.verify_user("expired-token")
+    assert invalid.value.status_code == 401
+
+
+def test_verify_user_rejects_invalid_auth_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    def invalid_json(request: object, timeout: float) -> FakeResponse:
+        del request, timeout
+        return FakeResponse(b"not-json")
+
+    monkeypatch.setattr("journal_matcher_api.hosted.urlopen", invalid_json)
+    client = SupabaseHttpClient(SupabaseSettings("https://project.supabase.co", "server-secret", "publishable-key"))
+    with pytest.raises(HTTPException) as invalid:
+        client.verify_user("user-token")
+    assert invalid.value.status_code == 502
 
 
 def test_upstream_error_does_not_echo_sensitive_body(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -131,6 +181,37 @@ class StubClient:
         del kwargs
         self.calls.append((name, method))
         return self.responses.pop(0)
+
+
+class AuthStubClient(StubClient):
+    def __init__(self, user: dict[str, object], member: bool) -> None:
+        super().__init__([[{"workspace_id": "11111111-1111-4111-8111-111111111111"}] if member else []])
+        self.user = user
+
+    def verify_user(self, access_token: str) -> dict[str, object]:
+        assert access_token == "user-token"
+        return self.user
+
+
+def test_hosted_authentication_requires_named_workspace_member() -> None:
+    user_id = "33333333-3333-4333-8333-333333333333"
+    store = HostedFoundationStore(AuthStubClient({"id": user_id, "is_anonymous": False}, True))  # type: ignore[arg-type]
+    principal = authenticate(
+        store,
+        "Bearer user-token",
+        "11111111-1111-4111-8111-111111111111",
+    )
+    assert principal == Principal(user_id, "11111111-1111-4111-8111-111111111111")
+
+    anonymous = HostedFoundationStore(AuthStubClient({"id": user_id, "is_anonymous": True}, True))  # type: ignore[arg-type]
+    with pytest.raises(HTTPException) as anonymous_error:
+        authenticate(anonymous, "Bearer user-token", "11111111-1111-4111-8111-111111111111")
+    assert anonymous_error.value.status_code == 401
+
+    nonmember = HostedFoundationStore(AuthStubClient({"id": user_id, "is_anonymous": False}, False))  # type: ignore[arg-type]
+    with pytest.raises(HTTPException) as membership_error:
+        authenticate(nonmember, "Bearer user-token", "11111111-1111-4111-8111-111111111111")
+    assert membership_error.value.status_code == 403
 
 
 def test_hosted_project_payload_is_workspace_scoped() -> None:

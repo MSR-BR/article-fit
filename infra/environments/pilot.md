@@ -5,12 +5,12 @@ Google Cloud project `article-fit-uff` are active. Hosted Python compute remains
 
 ## Services
 
-| Component | Proposed provider | Region | Exposure |
-| --- | --- | --- | --- |
-| Next.js web/proxy | Vercel | `gru1` | invitation-only HTTPS |
-| Postgres/Auth/Queue/Storage | Supabase | `sa-east-1` | RLS/private buckets |
-| FastAPI | Google Cloud Run | `us-east1` | authenticated web-proxy/service access |
-| Python worker | Google Cloud Run Job | `us-east1` | no public ingress; bounded executions |
+| Component                   | Proposed provider    | Region      | Exposure                               |
+| --------------------------- | -------------------- | ----------- | -------------------------------------- |
+| Next.js web/proxy           | Vercel               | `gru1`      | invitation-only HTTPS                  |
+| Postgres/Auth/Queue/Storage | Supabase             | `sa-east-1` | RLS/private buckets                    |
+| FastAPI                     | Google Cloud Run     | `us-east1`  | authenticated web-proxy/service access |
+| Python worker               | Google Cloud Run Job | `us-east1`  | no public ingress; bounded executions  |
 
 ## Secret classes
 

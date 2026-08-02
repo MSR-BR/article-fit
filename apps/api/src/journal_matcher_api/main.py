@@ -141,7 +141,9 @@ def get_store() -> Store:
         key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
         if not url or not key:
             raise RuntimeError("Hosted persistence requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY")
-        return HostedFoundationStore(SupabaseHttpClient(SupabaseSettings(url, key)))
+        return HostedFoundationStore(
+            SupabaseHttpClient(SupabaseSettings(url, key, os.getenv("SUPABASE_PUBLISHABLE_KEY")))
+        )
     data_root = Path(os.getenv("JOURNAL_MATCHER_DATA_ROOT", "/tmp/journal-matcher"))
     return FoundationStore(data_root / "metadata.sqlite3", data_root / "objects")
 
@@ -158,22 +160,42 @@ def analysis_repository(store: Store) -> AnalysisStore:
     return AnalysisRepository(store.database_path)
 
 
+StoreDependency = Annotated[Store, Depends(get_store)]
+
+
 def authenticate(
+    store: StoreDependency,
     authorization: Annotated[str | None, Header()] = None,
     workspace_id: Annotated[str | None, Header(alias="X-Workspace-Id")] = None,
 ) -> Principal:
-    expected = os.getenv("JOURNAL_MATCHER_INVITE_TOKEN", "local-invite-token")
-    if authorization != f"Bearer {expected}" or not workspace_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid invitation")
+    if not authorization or not authorization.startswith("Bearer ") or not workspace_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
     try:
         normalized_workspace = str(__import__("uuid").UUID(workspace_id))
     except ValueError as error:
         raise HTTPException(status_code=400, detail="Invalid workspace identifier") from error
+
+    access_token = authorization.removeprefix("Bearer ").strip()
+    if isinstance(store, HostedFoundationStore):
+        user = store.client.verify_user(access_token)
+        user_id = user.get("id")
+        if user.get("is_anonymous") is True or not isinstance(user_id, str):
+            raise HTTPException(status_code=401, detail="Named pilot access is required")
+        try:
+            normalized_user_id = str(__import__("uuid").UUID(user_id))
+        except ValueError as error:
+            raise HTTPException(status_code=401, detail="Invalid hosted user") from error
+        if not store.is_workspace_member(normalized_user_id, normalized_workspace):
+            raise HTTPException(status_code=403, detail="User is not a member of this workspace")
+        return Principal(user_id=normalized_user_id, workspace_id=normalized_workspace)
+
+    expected = os.getenv("JOURNAL_MATCHER_INVITE_TOKEN", "local-invite-token")
+    if access_token != expected:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid invitation")
     return Principal(user_id="invited-pilot-user", workspace_id=normalized_workspace)
 
 
 PrincipalDependency = Annotated[Principal, Depends(authenticate)]
-StoreDependency = Annotated[Store, Depends(get_store)]
 
 app = FastAPI(
     title="Article Fit API",

@@ -4,7 +4,8 @@ import './styles.css';
 
 export const metadata: Metadata = {
   title: 'Article Fit',
-  description: 'Prepare seu manuscrito para o padrão editorial da revista certa.',
+  description:
+    'Prepare seu manuscrito para o padrão editorial da revista certa.',
 };
 
 export default function RootLayout({

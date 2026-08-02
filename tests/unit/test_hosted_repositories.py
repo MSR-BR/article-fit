@@ -170,9 +170,12 @@ def test_worker_queue_and_job_state_boundaries() -> None:
 
     assert store.read_queue() == [{"msg_id": 9, "message": {}}]
     assert store.worker_job(str(queued["id"])) == queued
-    assert store.update_worker_job(
-        str(queued["id"]), state="running", stage="journal-research", progress=10, increment_attempt=True
-    ) == running
+    assert (
+        store.update_worker_job(
+            str(queued["id"]), state="running", stage="journal-research", progress=10, increment_attempt=True
+        )
+        == running
+    )
     store.delete_queue_message(9)
     assert client.rpcs == [("read", "pgmq_public"), ("delete", "pgmq_public")]
 

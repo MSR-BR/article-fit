@@ -1,6 +1,8 @@
 'use client';
 
-import { ChangeEvent, useMemo, useState } from 'react';
+import { ChangeEvent, useEffect, useMemo, useState } from 'react';
+import { createClient } from '../lib/supabase/client';
+import { SignIn } from './sign-in';
 
 type UploadState = {
   references: File[];
@@ -25,7 +27,10 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/journal-matcher${path}`, init);
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
-    const detail = typeof payload.detail === 'string' ? payload.detail : payload.detail?.message;
+    const detail =
+      typeof payload.detail === 'string'
+        ? payload.detail
+        : payload.detail?.message;
     throw new Error(detail || `A operação falhou (${response.status}).`);
   }
   return response.json() as Promise<T>;
@@ -46,7 +51,12 @@ function FileSummary({ files }: { files: File[] }) {
   );
 }
 
-export default function HomePage() {
+export default function HomePage({
+  initialUserEmail,
+}: { initialUserEmail?: string | null } = {}) {
+  const [authEmail, setAuthEmail] = useState<string | null | undefined>(
+    initialUserEmail,
+  );
   const [uploads, setUploads] = useState<UploadState>({
     references: [],
     manuscript: null,
@@ -58,18 +68,41 @@ export default function HomePage() {
   const [error, setError] = useState('');
   const [analysisId, setAnalysisId] = useState('');
   const [artifacts, setArtifacts] = useState<string[]>([]);
-  const [guidance, setGuidance] = useState({ scopeUrl: '', guideUrl: '', scopeSnapshot: '', guideSnapshot: '' });
+  const [guidance, setGuidance] = useState({
+    scopeUrl: '',
+    guideUrl: '',
+    scopeSnapshot: '',
+    guideSnapshot: '',
+  });
+
+  useEffect(() => {
+    if (initialUserEmail !== undefined) return;
+    let active = true;
+    createClient()
+      .auth.getUser()
+      .then(({ data }) => {
+        if (active) setAuthEmail(data.user?.email ?? null);
+      })
+      .catch(() => {
+        if (active) setAuthEmail(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [initialUserEmail]);
 
   const assistedValues = Object.values(guidance).map((value) => value.trim());
   const assistedStarted = assistedValues.some(Boolean);
-  const assistedReady = assistedValues.every(Boolean)
-    && guidance.scopeSnapshot.trim().length >= 500
-    && guidance.guideSnapshot.trim().length >= 500;
+  const assistedReady =
+    assistedValues.every(Boolean) &&
+    guidance.scopeSnapshot.trim().length >= 500 &&
+    guidance.guideSnapshot.trim().length >= 500;
 
   const ready =
     journal.trim().length >= 2 &&
     uploads.references.length >= 3 &&
-    uploads.manuscript !== null && (!assistedStarted || assistedReady);
+    uploads.manuscript !== null &&
+    (!assistedStarted || assistedReady);
   const status = useMemo(() => {
     if (assistedStarted && !assistedReady) {
       return 'Complete o pacote de orientação oficial assistida para iniciar.';
@@ -107,18 +140,23 @@ export default function HomePage() {
       });
       setActiveStep(1);
       const documents = [
-        ...uploads.references.slice(0, 3).map((file, index) => ({ file, slot: `reference-${index + 1}` })),
+        ...uploads.references
+          .slice(0, 3)
+          .map((file, index) => ({ file, slot: `reference-${index + 1}` })),
         { file: uploads.manuscript, slot: 'manuscript' },
       ];
       for (const { file, slot } of documents) {
-        await api(`/projects/${project.id}/documents/${slot}?filename=${encodeURIComponent(file.name)}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/octet-stream',
-            'X-Document-Media-Type': file.type,
+        await api(
+          `/projects/${project.id}/documents/${slot}?filename=${encodeURIComponent(file.name)}`,
+          {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/octet-stream',
+              'X-Document-Media-Type': file.type,
+            },
+            body: file,
           },
-          body: file,
-        });
+        );
       }
       setActiveStep(2);
       const initiated = await api<{
@@ -128,42 +166,54 @@ export default function HomePage() {
         state?: string;
         progress?: number;
         errorCode?: string | null;
-      }>(
-        `/projects/${project.id}/run`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            idempotencyKey: crypto.randomUUID(),
-            ...(assistedReady ? guidance : {}),
-          }),
-        },
-      );
+      }>(`/projects/${project.id}/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          idempotencyKey: crypto.randomUUID(),
+          ...(assistedReady ? guidance : {}),
+        }),
+      });
       let workflow = initiated;
       if (!workflow.analysisId && workflow.id) {
         for (let attempt = 0; attempt < 300; attempt += 1) {
-          const job = await api<{ state: string; progress: number; errorCode?: string | null }>(`/jobs/${workflow.id}`);
+          const job = await api<{
+            state: string;
+            progress: number;
+            errorCode?: string | null;
+          }>(`/jobs/${workflow.id}`);
           setActiveStep(job.progress >= 100 ? 3 : 2);
           if (job.state === 'failed' || job.state === 'cancelled') {
-            throw new Error(job.errorCode ? `A análise falhou (${job.errorCode}).` : 'A análise não foi concluída.');
+            throw new Error(
+              job.errorCode
+                ? `A análise falhou (${job.errorCode}).`
+                : 'A análise não foi concluída.',
+            );
           }
           if (job.state === 'succeeded') {
-            workflow = await api<{ analysisId: string; artifacts: Array<{ kind: string }> }>(
-              `/projects/${project.id}/latest-analysis`,
-            );
+            workflow = await api<{
+              analysisId: string;
+              artifacts: Array<{ kind: string }>;
+            }>(`/projects/${project.id}/latest-analysis`);
             break;
           }
           await new Promise((resolve) => window.setTimeout(resolve, 2000));
         }
       }
       if (!workflow.analysisId || !workflow.artifacts) {
-        throw new Error('A análise excedeu o tempo de acompanhamento. Tente novamente mais tarde.');
+        throw new Error(
+          'A análise excedeu o tempo de acompanhamento. Tente novamente mais tarde.',
+        );
       }
       setAnalysisId(workflow.analysisId);
       setArtifacts(workflow.artifacts.map((item) => item.kind));
       setActiveStep(3);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Não foi possível concluir a análise.');
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : 'Não foi possível concluir a análise.',
+      );
       setStarted(false);
     }
   }
@@ -188,20 +238,49 @@ export default function HomePage() {
     }));
   }
 
+  async function signOut() {
+    await createClient().auth.signOut();
+    setAuthEmail(null);
+  }
+
+  if (authEmail === undefined) {
+    return (
+      <main className="auth-shell">
+        <p className="auth-loading" role="status">
+          <span className="spinner" aria-hidden="true" /> Verificando acesso…
+        </p>
+      </main>
+    );
+  }
+
+  if (authEmail === null) {
+    return <SignIn onSignedIn={setAuthEmail} />;
+  }
+
   return (
     <main>
       <header className="brand" aria-label="Article Fit">
-        <span className="brand-mark" aria-hidden="true">AF</span>
-        <span>Article Fit</span>
+        <span className="brand-identity">
+          <span className="brand-mark" aria-hidden="true">
+            AF
+          </span>
+          <span>Article Fit</span>
+        </span>
+        <span className="account">
+          <span>{authEmail}</span>
+          <button type="button" onClick={signOut}>
+            Sair
+          </button>
+        </span>
       </header>
 
       <section className="intro" aria-labelledby="page-title">
         <p className="eyebrow">Prepare seu artigo para a revista certa</p>
-          <h1 id="page-title">Do rascunho à submissão.</h1>
+        <h1 id="page-title">Do rascunho à submissão.</h1>
         <p className="lede">
           Informe a revista, envie artigos de orientação e o seu manuscrito. O
-          Article Fit aprende o padrão editorial e entrega uma revisão de
-          forma e conteúdo.
+          Article Fit aprende o padrão editorial e entrega uma revisão de forma
+          e conteúdo.
         </p>
       </section>
 
@@ -244,7 +323,8 @@ export default function HomePage() {
           <FileSummary files={uploads.references} />
           {uploads.references.length > 3 && (
             <small className="file-limit-notice">
-              O MVP processará os três primeiros PDFs; os demais não serão enviados.
+              O MVP processará os três primeiros PDFs; os demais não serão
+              enviados.
             </small>
           )}
         </div>
@@ -276,7 +356,8 @@ export default function HomePage() {
       <details className="assisted-guidance">
         <summary>A editora bloqueia a consulta automática?</summary>
         <p>
-          Informe as páginas oficiais e cole o texto visível delas. Use somente quando o aplicativo indicar bloqueio.
+          Informe as páginas oficiais e cole o texto visível delas. Use somente
+          quando o aplicativo indicar bloqueio.
         </p>
         <div className="assisted-grid">
           <label>
@@ -309,7 +390,10 @@ export default function HomePage() {
               value={guidance.scopeSnapshot}
               onChange={(event) => {
                 const value = event.currentTarget.value;
-                setGuidance((current) => ({ ...current, scopeSnapshot: value }));
+                setGuidance((current) => ({
+                  ...current,
+                  scopeSnapshot: value,
+                }));
               }}
               minLength={500}
             />
@@ -320,14 +404,19 @@ export default function HomePage() {
               value={guidance.guideSnapshot}
               onChange={(event) => {
                 const value = event.currentTarget.value;
-                setGuidance((current) => ({ ...current, guideSnapshot: value }));
+                setGuidance((current) => ({
+                  ...current,
+                  guideSnapshot: value,
+                }));
               }}
               minLength={500}
             />
           </label>
         </div>
         {assistedStarted && !assistedReady && (
-          <small className="file-limit-notice">Preencha as duas URLs e pelo menos 500 caracteres de cada página.</small>
+          <small className="file-limit-notice">
+            Preencha as duas URLs e pelo menos 500 caracteres de cada página.
+          </small>
         )}
       </details>
 
@@ -382,21 +471,49 @@ export default function HomePage() {
               aria-valuemax={progressStages.length}
               aria-valuenow={activeStep + 1}
             >
-              <span style={{ width: `${((activeStep + 1) / progressStages.length) * 100}%` }} />
+              <span
+                style={{
+                  width: `${((activeStep + 1) / progressStages.length) * 100}%`,
+                }}
+              />
             </div>
             <ol className="progress-steps">
               {progressStages.map((stage, index) => {
-                const state = index < activeStep ? 'complete' : index === activeStep ? (error ? 'error' : 'active') : '';
-                const label = index < activeStep ? 'Concluído' : index === activeStep ? (error ? 'Interrompido' : 'Em andamento') : 'Aguardando';
+                const state =
+                  index < activeStep
+                    ? 'complete'
+                    : index === activeStep
+                      ? error
+                        ? 'error'
+                        : 'active'
+                      : '';
+                const label =
+                  index < activeStep
+                    ? 'Concluído'
+                    : index === activeStep
+                      ? error
+                        ? 'Interrompido'
+                        : 'Em andamento'
+                      : 'Aguardando';
                 return (
                   <li className={state} key={stage}>
-                    <span className={state === 'active' ? 'step-spinner' : ''} aria-hidden="true" />
-                    <div><strong>{stage}</strong><small>{label}</small></div>
+                    <span
+                      className={state === 'active' ? 'step-spinner' : ''}
+                      aria-hidden="true"
+                    />
+                    <div>
+                      <strong>{stage}</strong>
+                      <small>{label}</small>
+                    </div>
                   </li>
                 );
               })}
             </ol>
-            {error && <p className="preview-notice error" role="alert">{error}</p>}
+            {error && (
+              <p className="preview-notice error" role="alert">
+                {error}
+              </p>
+            )}
             {activeStep === progressStages.length - 1 && !error && (
               <p className="preview-notice" role="status">
                 Análise concluída. Os arquivos estão disponíveis abaixo.
@@ -413,9 +530,16 @@ export default function HomePage() {
         </div>
       )}
 
-      {error && !showProgress && <p className="status error" role="alert">{error}</p>}
+      {error && !showProgress && (
+        <p className="status error" role="alert">
+          {error}
+        </p>
+      )}
 
-      <section className={`results ${artifacts.length ? 'visible' : ''}`} aria-labelledby="results-title">
+      <section
+        className={`results ${artifacts.length ? 'visible' : ''}`}
+        aria-labelledby="results-title"
+      >
         <div>
           <p className="eyebrow">Saídas</p>
           <h2 id="results-title">Resultados</h2>
@@ -428,7 +552,11 @@ export default function HomePage() {
         {artifacts.length > 0 && (
           <div className="result-grid">
             {artifacts.map((kind) => (
-              <a key={kind} href={`/api/journal-matcher/analyses/${analysisId}/artifacts/${kind}`} download>
+              <a
+                key={kind}
+                href={`/api/journal-matcher/analyses/${analysisId}/artifacts/${kind}`}
+                download
+              >
                 <span>{artifactLabels[kind] ?? kind}</span>
                 <small>Baixar arquivo</small>
               </a>
@@ -438,7 +566,8 @@ export default function HomePage() {
       </section>
 
       <footer>
-        Seus arquivos serão privados e usados somente para preparar esta revisão.
+        Seus arquivos serão privados e usados somente para preparar esta
+        revisão.
       </footer>
     </main>
   );

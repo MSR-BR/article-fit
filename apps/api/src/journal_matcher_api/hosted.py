@@ -29,6 +29,7 @@ from journal_matcher_api.manuscript_analysis import Decision, now_iso, stable_id
 class SupabaseSettings:
     url: str
     service_role_key: str
+    publishable_key: str | None = None
 
     def __post_init__(self) -> None:
         if not self.url.startswith("https://"):
@@ -43,7 +44,35 @@ class SupabaseHttpClient:
     def __init__(self, settings: SupabaseSettings, timeout: float = 30.0) -> None:
         self._base_url = settings.url.rstrip("/")
         self._key = settings.service_role_key
+        self._publishable_key = settings.publishable_key
         self._timeout = timeout
+
+    def verify_user(self, access_token: str) -> dict[str, Any]:
+        """Validate a hosted access token against Supabase Auth."""
+        if not self._publishable_key:
+            raise HTTPException(status_code=503, detail="Hosted authentication is not configured")
+        request = Request(
+            f"{self._base_url}/auth/v1/user",
+            headers={
+                "apikey": self._publishable_key,
+                "Authorization": f"Bearer {access_token}",
+            },
+            method="GET",
+        )
+        try:
+            with urlopen(request, timeout=self._timeout) as response:  # noqa: S310 - fixed trusted base URL
+                payload = json.loads(response.read())
+        except HTTPError as error:
+            if error.code in {401, 403}:
+                raise HTTPException(status_code=401, detail="Invalid or expired session") from None
+            raise HTTPException(status_code=502, detail=f"Hosted authentication failed ({error.code})") from None
+        except (TimeoutError, URLError) as error:
+            raise HTTPException(status_code=503, detail="Hosted authentication is temporarily unavailable") from error
+        except json.JSONDecodeError as error:
+            raise HTTPException(status_code=502, detail="Hosted authentication returned invalid JSON") from error
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=502, detail="Hosted authentication returned an invalid user")
+        return payload
 
     def table(
         self,
@@ -163,6 +192,20 @@ class HostedFoundationStore:
 
     def __init__(self, client: SupabaseHttpClient) -> None:
         self.client = client
+
+    def is_workspace_member(self, user_id: str, workspace_id: str) -> bool:
+        rows = require_rows(
+            self.client.table(
+                "workspace_members",
+                query={
+                    "select": "workspace_id",
+                    "workspace_id": f"eq.{workspace_id}",
+                    "user_id": f"eq.{user_id}",
+                    "limit": "1",
+                },
+            )
+        )
+        return bool(rows)
 
     def audit(
         self,
@@ -561,9 +604,7 @@ class HostedFoundationStore:
         }
         if workspace_id is not None:
             query["workspace_id"] = f"eq.{workspace_id}"
-        rows = require_rows(
-            self.client.table("projects", query=query)
-        )
+        rows = require_rows(self.client.table("projects", query=query))
         for row in rows:
             self.delete_project(Principal(str(row["owner_id"]), str(row["workspace_id"])), str(row["id"]))
         return len(rows)

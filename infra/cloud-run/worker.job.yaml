@@ -15,12 +15,12 @@ spec:
       template:
         spec:
           maxRetries: 2
-          timeoutSeconds: "3600"
+          timeoutSeconds: '3600'
           serviceAccountName: article-fit-worker@article-fit-uff.iam.gserviceaccount.com
           containers:
             - image: us-east1-docker.pkg.dev/article-fit-uff/article-fit/worker:IMAGE_TAG
-              args: ["--process-batch", "--batch-size", "1"]
+              args: ['--process-batch', '--batch-size', '1']
               resources:
                 limits:
-                  cpu: "1"
+                  cpu: '1'
                   memory: 1Gi
