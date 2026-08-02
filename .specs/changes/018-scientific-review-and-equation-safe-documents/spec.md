@@ -56,11 +56,11 @@ Make the final deliverables scientifically useful and visually readable: a refer
 
 ## Completion checklist
 
-- [ ] Reference excerpts included in the bounded Gemini review context.
-- [ ] Scientific/editorial coverage contract implemented and validated.
-- [ ] Report content hierarchy upgraded.
-- [ ] PDF-source Word review preserves the visual manuscript.
-- [ ] Mathematical expressions render legibly.
-- [ ] Progress dialog closes after success.
-- [ ] Automated and visual checks pass.
-- [ ] Commit, push, deployment, and production verification complete.
+- [x] Reference excerpts included in the bounded Gemini review context.
+- [x] Scientific/editorial coverage contract implemented and validated.
+- [x] Report content hierarchy upgraded.
+- [x] PDF-source Word review preserves the visual manuscript.
+- [x] Mathematical expressions render legibly.
+- [x] Progress dialog closes after success.
+- [x] Automated and visual checks pass.
+- [x] Commit, push, deployment, and production verification complete.
