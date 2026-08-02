@@ -20,6 +20,7 @@ Status: complete.
 
 ## Hosted runtime evidence
 
+- Implementation commit: `332482e` on `agent/article-fit-pilot`.
 - Cloud Build `b90adcaf-244f-48af-8af3-e292d4a9b472` completed successfully for tag `c13-20260802-1`.
 - Cloud Run API revision `article-fit-api-00005-7tf` passed its tagged health check before receiving 100% traffic.
 - A direct API request without the internal credential returned HTTP 401.

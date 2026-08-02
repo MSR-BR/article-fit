@@ -2,7 +2,7 @@
 
 ## Runtime artifacts
 
-- Source branch: `agent/article-fit-pilot`.
+- Source implementation commit: `332482e` on `agent/article-fit-pilot`.
 - Database migrations: `0001` through `0007` in the existing Supabase project.
 - Cloud Build: `b90adcaf-244f-48af-8af3-e292d4a9b472` (`SUCCESS`).
 - API image: `us-east1-docker.pkg.dev/article-fit-uff/article-fit/api:c13-20260802-1`.
