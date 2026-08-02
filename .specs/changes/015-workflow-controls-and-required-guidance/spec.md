@@ -1,6 +1,6 @@
 # Change 015 — Workflow controls and required official guidance
 
-Status: `approved — implementation in progress`
+Status: `complete`
 
 ## Objective
 
@@ -47,5 +47,5 @@ Give the user direct control over a running analysis, prevent progress regressio
 
 - [x] Owner approved Stop, Reset, simplified error guidance, and required Scope/Guide inputs.
 - [x] Production evidence identified the HTTP 403 and progress-regression causes.
-- [ ] Implementation and automated validation complete.
-- [ ] CPD and hosted validation complete.
+- [x] Implementation and automated validation complete.
+- [x] CPD and hosted validation complete.
