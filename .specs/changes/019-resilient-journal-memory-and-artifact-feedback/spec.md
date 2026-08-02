@@ -70,5 +70,5 @@ Make the hosted workflow resilient to temporary AI-provider and browser-connecti
 - [x] AI synthesis refines journal memory before the current manuscript review.
 - [x] Artifact-specific feedback UI and API implemented.
 - [x] Feedback learning remains advisory, provenance-bounded, and free of raw private text.
-- [ ] Automated and production checks pass.
-- [ ] Commit, push, and production deployments complete.
+- [x] Automated and production checks pass.
+- [x] Commit, push, and production deployments complete.

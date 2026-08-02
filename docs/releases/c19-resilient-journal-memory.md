@@ -2,15 +2,15 @@
 
 ## Runtime artifacts
 
-- Source implementation commit: pending.
+- Source implementation commit: `9c76c9e` on `agent/article-fit-pilot`.
 - Database migrations: unchanged at `0001` through `0008`.
-- Cloud Build: pending.
+- Cloud Build: `9da59313-6546-4b21-ac4c-d5d08492569e` (`SUCCESS`).
 - API image: `us-east1-docker.pkg.dev/article-fit-uff/article-fit/api:c19-20260802-1`.
 - Worker image: `us-east1-docker.pkg.dev/article-fit-uff/article-fit/worker:c19-20260802-1`.
-- Active API revision: pending.
-- Worker health execution: pending.
+- Active API revision: `article-fit-api-00021-yul` at 100% traffic.
+- Worker health execution: `article-fit-worker-9npbb` (`SUCCEEDED`, zero failures).
 - Vercel preview: `dpl_EHnPiryiRu1Ao84i5a3822PkkhA7` (`READY`).
-- Vercel production: pending.
+- Vercel production: `dpl_DFFhcQM4d1wGSkrk2LDFgcHFKZ6C` (`READY`), aliased to `https://article-fit.vercel.app`.
 
 ## Product behavior
 

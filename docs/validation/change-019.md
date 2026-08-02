@@ -1,6 +1,6 @@
 # Change 019 — Resilient journal memory and artifact feedback
 
-Status: implementation validated locally; hosted deployment evidence pending.
+Status: deployed and production health verified.
 
 ## Production incident diagnosis
 
@@ -36,6 +36,7 @@ Status: implementation validated locally; hosted deployment evidence pending.
 - Python API/worker: 119 tests passed with 90.04% total coverage.
 - Total: 147 tests passed.
 - Formatting, lint, typecheck, production build, dependency boundaries, and secret scan passed.
+- Production dependency audit reported zero vulnerabilities.
 
 ## Visual evidence
 
@@ -46,4 +47,12 @@ Status: implementation validated locally; hosted deployment evidence pending.
 
 ## Hosted evidence
 
-Pending commit, Cloud Build, Cloud Run promotion, worker health execution, Vercel production promotion, and public smoke checks.
+- Source commit `9c76c9e` was pushed to `origin/agent/article-fit-pilot`.
+- Cloud Build `9da59313-6546-4b21-ac4c-d5d08492569e` completed successfully for tag `c19-20260802-1`.
+- API revision `article-fit-api-00021-yul` returned 200 from `/health` and 401 from an unauthenticated private resource before receiving traffic.
+- The API revision now receives 100% traffic; C18 revision `article-fit-api-00019-sep` remains available at 0% for rollback.
+- Worker and retention jobs use the C19 image. Worker execution `article-fit-worker-9npbb` completed with `processed=0` and `failures=0`.
+- Vercel production `dpl_DFFhcQM4d1wGSkrk2LDFgcHFKZ6C` reached `READY` and owns `https://article-fit.vercel.app`.
+- The public page and frontend health returned 200. A versioned proxy request reached the backend through the dynamic Vercel route and returned the expected JSON 404 for a nonexistent project.
+- The public production interface was opened, snapshotted, and visually inspected in a real browser.
+- No error logs were found for the promoted Vercel deployment or Cloud Run revision.
