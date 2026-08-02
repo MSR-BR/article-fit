@@ -39,3 +39,4 @@ The first owner email delivered Supabase's hosted magic link rather than the num
 - Cloud Run worker health execution: `article-fit-worker-4rs5w`, completed successfully without queue access.
 - Vercel production: deployment `dpl_2EVNhNHxU6wrpgXwyjppqxJmB4Xv`, status `READY`, aliased to `https://article-fit.vercel.app`.
 - Post-deploy error scan: no Vercel errors and no `ERROR` entries for the API revision during the validation window.
+- Email-link corrective deployment: commit `783ec3f`, Vercel deployment `dpl_EMFqyNnrpq2rCVUWAU6vCg6HZTEf`, status `READY`, production alias and web health check verified. No Vercel error entries were found in the post-deploy window; the Cloud Run image was unchanged because this correction is browser-only.
