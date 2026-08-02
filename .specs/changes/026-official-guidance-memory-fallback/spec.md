@@ -40,5 +40,5 @@ Prevent a publisher access block from stopping an analysis when Article Fit alre
 - [x] Historical fallback implemented.
 - [x] Snapshot inheritance implemented.
 - [x] Regression tests passed.
-- [ ] Hosted PRL execution passed.
-- [ ] CPD complete.
+- [x] Hosted PRL execution passed.
+- [x] CPD complete.
