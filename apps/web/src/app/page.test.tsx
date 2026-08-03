@@ -119,9 +119,10 @@ describe('HomePage', () => {
       '/api/journal-matcher/analyses/analysis-1/artifacts/revision-report.pdf',
     );
     expect(
-      screen.getByRole('link', {
-        name: /Color-coded manuscript review \(Word\)/,
-      }),
+      screen.queryByText(/Color-coded manuscript review \(Word\)/),
+    ).toBeNull();
+    expect(
+      screen.getByRole('link', { name: /Template-faithful manuscript review/ }),
     ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(6);
     expect(JSON.parse(String(fetchMock.mock.calls[5]?.[1]?.body))).toEqual({

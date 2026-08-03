@@ -61,7 +61,7 @@ const progressStages = [
     start: 90,
     end: 100,
     message:
-      'Generating the report and color-coded review copies, then validating each file.',
+      'Generating the report and template-faithful PDF review, then validating each file.',
   },
 ] as const;
 
@@ -140,7 +140,6 @@ function requestError(status: number) {
 
 const artifactLabels: Record<string, string> = {
   'revision-report.pdf': 'Submission-fit report (PDF)',
-  'revised-manuscript.docx': 'Color-coded manuscript review (Word)',
   'revised-manuscript.pdf': 'Template-faithful manuscript review (PDF)',
 };
 
@@ -379,7 +378,11 @@ export default function HomePage() {
         );
       }
       setAnalysisId(workflow.analysisId);
-      setArtifacts(workflow.artifacts.map((item) => item.kind));
+      setArtifacts(
+        workflow.artifacts
+          .map((item) => item.kind)
+          .filter((kind) => kind !== 'revised-manuscript.docx'),
+      );
       setOverallProgress(100);
       setActiveStep(progressStages.length - 1);
       setRunState('succeeded');
