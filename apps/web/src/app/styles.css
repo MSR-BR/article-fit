@@ -641,6 +641,43 @@ h2 {
 .result-grid span {
   font-weight: 700;
 }
+.result-download {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 4.5rem;
+  padding: 1rem 1.25rem;
+  color: #124f3d;
+  text-decoration: none;
+  background: #edf7f1;
+  border-bottom: 1px solid #d1d2cc;
+}
+.result-download:hover,
+.result-download:focus-visible {
+  background: #dff0e7;
+  text-decoration: underline;
+}
+.result-download-title {
+  color: #18231f;
+}
+.download-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex: 0 0 auto;
+  padding: 0.65rem 0.9rem;
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 800;
+  white-space: nowrap;
+  background: #176348;
+  border-radius: 0.5rem;
+}
+.download-icon {
+  font-size: 1.2rem;
+  line-height: 1;
+}
 .result-grid small {
   color: #69716d;
 }

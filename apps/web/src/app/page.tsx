@@ -844,9 +844,14 @@ export default function HomePage() {
                     className="result-download"
                     href={`/api/journal-matcher/analyses/${analysisId}/artifacts/${kind}`}
                     download
+                    aria-label={`Download ${artifactLabels[kind] ?? kind}`}
                   >
-                    <span>{artifactLabels[kind] ?? kind}</span>
-                    <small>Download file</small>
+                    <span className="result-download-title">
+                      {artifactLabels[kind] ?? kind}
+                    </span>
+                    <span className="download-action" aria-hidden="true">
+                      <span className="download-icon">↓</span> Download file
+                    </span>
                   </a>
                   <div className="artifact-feedback">
                     <label htmlFor={fieldId}>Feedback on this file</label>
