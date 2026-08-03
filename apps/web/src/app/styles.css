@@ -1052,6 +1052,46 @@ h1 {
   opacity: 0.92;
   background: #78918f;
 }
+.file-list li {
+  border-color: rgb(255 232 203 / 42%);
+  color: #fff4e5;
+}
+.file-list small {
+  color: #d9e9e8;
+}
+.reset-button {
+  border-color: #f3a47d;
+  background: rgb(243 164 125 / 12%);
+  color: #173b48;
+}
+.progress-modal {
+  background: #f8eee1;
+  color: #173b48;
+}
+.progress-modal .eyebrow,
+.progress-modal h2,
+.progress-modal .activity-line strong,
+.progress-modal .progress-steps li.active,
+.progress-modal .progress-steps li.complete {
+  color: #245c58;
+}
+.progress-modal .progress-description,
+.progress-modal .overall-progress,
+.progress-modal .progress-steps li,
+.progress-modal .progress-steps small {
+  color: #4c696c;
+}
+.progress-modal .progress-track {
+  background: #d9e3dc;
+}
+.progress-modal .progress-steps li.active > span,
+.progress-modal .progress-steps li.complete > span {
+  border-color: #2e835f;
+}
+.progress-modal .close-button {
+  background: #e4e2dc;
+  color: #315d6c;
+}
 .results:not(.visible) p,
 .results:not(.visible) h2,
 .results:not(.visible) .eyebrow {
