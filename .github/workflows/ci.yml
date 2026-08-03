@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      actions: read
       security-events: write
     steps:
       - uses: actions/checkout@v4
@@ -47,6 +48,8 @@ jobs:
         with:
           python-version-file: .python-version
           cache: pip
+      - name: Install PDF test utility
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y poppler-utils
       - run: pip install --require-hashes -r requirements-dev.lock
       - run: pip install --require-hashes -r requirements.lock
       - run: pip install --no-deps -e .
