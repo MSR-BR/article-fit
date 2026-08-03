@@ -552,8 +552,9 @@ export default function HomePage() {
             ))}
           </datalist>
           <small>
-            Enter the journal&apos;s full name. Article Fit will find its ISSN,
-            Scope, and Guide for Authors.
+            The suggestions are journals already in Article Fit&apos;s profile
+            database, with an editorial history. If your journal is not listed,
+            type its name to add a new journal.
           </small>
         </div>
 
