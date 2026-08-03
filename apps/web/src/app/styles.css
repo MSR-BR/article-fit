@@ -727,6 +727,61 @@ footer {
   color: #c65e4b;
   font-weight: 700;
 }
+.footer-links button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #c65e4b;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.policy-backdrop {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(23 59 72 / 54%);
+  backdrop-filter: blur(5px);
+}
+.policy-modal {
+  position: relative;
+  width: min(680px, 100%);
+  max-height: min(680px, 90vh);
+  overflow-y: auto;
+  padding: 2rem;
+  border: 2px solid #f3a47d;
+  border-radius: 1.25rem;
+  background: #f8eee1;
+  color: #315d6c;
+  line-height: 1.55;
+  box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 30%);
+}
+.policy-modal h2 {
+  margin: 0 2.5rem 1rem 0;
+  color: #173b48;
+}
+.policy-modal p {
+  margin: 0.75rem 0;
+}
+.policy-close {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 0;
+  border-radius: 50%;
+  background: #f3a47d;
+  color: #173b48;
+  font-size: 1.5rem;
+  cursor: pointer;
+}
+.policy-section {
+  display: none;
+}
 .policy-section {
   margin-top: 1.5rem;
   padding: 1.4rem 1.6rem;

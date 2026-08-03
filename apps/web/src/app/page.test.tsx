@@ -581,4 +581,20 @@ describe('HomePage', () => {
       guideUrl: 'https://journals.aps.org/prl/authors',
     });
   });
+
+  it('opens policy dialogs and closes them with the close button or backdrop', () => {
+    render(<HomePage />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ethics' }));
+    expect(screen.getByRole('dialog', { name: 'Ethics' })).toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByRole('dialog').parentElement!);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Privacy' }));
+    expect(screen.getByRole('dialog', { name: 'Privacy' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Support' }));
+    expect(screen.getByRole('dialog', { name: 'Support' })).toBeInTheDocument();
+  });
 });
