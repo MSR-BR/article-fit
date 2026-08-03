@@ -824,6 +824,247 @@ footer {
   }
 }
 
+/* Friendly editorial workspace: warm canvas, compact app shell, and teal cards. */
+html,
+body {
+  background: #f7dfc3;
+  color: #173b48;
+}
+body {
+  background-image:
+    radial-gradient(
+      circle at 12% 8%,
+      rgb(255 244 224 / 70%),
+      transparent 34rem
+    ),
+    radial-gradient(
+      circle at 92% 70%,
+      rgb(235 180 147 / 24%),
+      transparent 30rem
+    );
+}
+main {
+  width: min(1160px, calc(100% - 3rem));
+  padding: 1.25rem 0 3rem;
+}
+.brand {
+  padding: 0.35rem 0;
+  color: #173b48;
+}
+.brand-mark {
+  width: 2.55rem;
+  height: 2.55rem;
+  background: #f3a47d;
+  color: #173b48;
+  box-shadow: 0 0.35rem 0 #d87e63;
+}
+.account {
+  color: #477080;
+}
+.account button,
+.text-button {
+  color: #c65e4b;
+}
+.intro {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(250px, 0.85fr);
+  align-items: end;
+  gap: 2rem;
+  padding: clamp(3rem, 8vw, 5.5rem) 0 2.5rem;
+}
+.intro .eyebrow {
+  color: #c65e4b;
+}
+h1 {
+  max-width: 760px;
+  color: #173b48;
+  font-size: clamp(2.8rem, 7vw, 5.6rem);
+  font-weight: 800;
+  letter-spacing: -0.06em;
+  line-height: 0.92;
+}
+.lede {
+  max-width: 440px;
+  margin: 0 0 0.25rem;
+  color: #477080;
+  font-size: 1.05rem;
+  line-height: 1.55;
+}
+.upload-panel,
+.results,
+.result-card,
+.progress-modal,
+.auth-card {
+  border: 0;
+  border-radius: 1.5rem;
+  background: #315d6c;
+  color: #fff4e5;
+  box-shadow: 0 1.2rem 2.5rem rgb(80 48 38 / 18%);
+}
+.journal-block,
+.upload-block {
+  padding: clamp(1.25rem, 3vw, 1.8rem);
+}
+.journal-block label,
+.upload-copy h2,
+.article-type-block label {
+  color: #fff4e5;
+}
+.journal-block input,
+.article-type-block select,
+.assisted-grid input,
+.assisted-grid textarea,
+.feedback textarea {
+  border: 2px solid rgb(255 232 203 / 48%);
+  background: #f8eee1;
+  color: #173b48;
+}
+.journal-block input::placeholder,
+.assisted-grid input::placeholder,
+.feedback textarea::placeholder {
+  color: #73909a;
+}
+.journal-block small,
+.article-type-block small,
+.file-limit-notice,
+.upload-copy p {
+  color: #d9e9e8;
+}
+.divider {
+  border-color: rgb(255 232 203 / 22%);
+}
+.step {
+  background: #f3a47d;
+  color: #173b48;
+}
+.upload-button,
+.analyze-button {
+  border: 0;
+  border-radius: 0.7rem;
+  background: #f3a47d;
+  color: #173b48;
+  box-shadow: 0 0.25rem 0 #d87e63;
+}
+.upload-button.secondary,
+.reset-button {
+  border-color: rgb(255 232 203 / 52%);
+  background: transparent;
+  color: #fff4e5;
+}
+.analyze-button:hover,
+.upload-button:hover {
+  background: #ffc096;
+}
+.status,
+.results p,
+.results h2,
+.results .eyebrow {
+  color: #fff4e5;
+}
+.results {
+  margin-top: 2rem;
+  padding: clamp(1.25rem, 3vw, 2rem);
+}
+.result-grid {
+  gap: 1rem;
+}
+.result-card {
+  overflow: hidden;
+  background: #234d5b;
+  box-shadow: none;
+}
+.result-download {
+  border: 0;
+  background: #397184;
+  color: #fff4e5;
+}
+.result-download-title {
+  color: #fff4e5;
+}
+.download-action {
+  background: #f3a47d;
+  color: #173b48;
+}
+.artifact-feedback {
+  border-color: rgb(255 232 203 / 22%);
+}
+.artifact-feedback label {
+  color: #fff4e5;
+}
+.artifact-feedback textarea {
+  border-color: rgb(255 232 203 / 45%);
+  background: #f8eee1;
+  color: #173b48;
+}
+.primary-actions {
+  gap: 0.8rem;
+}
+
+@media (max-width: 760px) {
+  main {
+    width: min(100% - 1.25rem, 580px);
+  }
+  .intro {
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+    padding: 3rem 0 2rem;
+  }
+  h1 {
+    font-size: clamp(2.8rem, 14vw, 4.6rem);
+  }
+  .lede {
+    max-width: none;
+  }
+}
+
+/* Final contrast and alignment corrections. */
+.article-type-block {
+  margin: 0;
+  padding: 0 clamp(1.25rem, 3vw, 1.8rem) 1.25rem;
+}
+.article-type-block select {
+  width: 100%;
+  max-width: none;
+}
+.upload-button.secondary {
+  border: 0;
+  background: #f3a47d;
+  color: #173b48;
+  box-shadow: 0 0.25rem 0 #d87e63;
+}
+.upload-button.secondary:hover {
+  background: #ffc096;
+}
+.status,
+.status.error {
+  color: #315d6c;
+}
+.status.ready {
+  color: #173b48;
+}
+.status span {
+  background: #477080;
+}
+.status.ready span {
+  background: #3b9f78;
+}
+.results:not(.visible) {
+  opacity: 0.92;
+  background: #78918f;
+}
+.results:not(.visible) p,
+.results:not(.visible) h2,
+.results:not(.visible) .eyebrow {
+  color: #fff7eb;
+}
+.analyze-button:disabled,
+.reset-button:disabled {
+  border-color: #d5c9bd;
+  background: #e4e2dc;
+  color: #7e8784;
+  box-shadow: none;
+}
+
 .auth-shell {
   min-height: 100vh;
   padding-top: 2rem;
