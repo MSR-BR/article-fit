@@ -931,7 +931,93 @@ export default function HomePage() {
       <footer>
         Original uploads are deleted after processing. Generated files remain
         available temporarily for up to 24 hours.
+        <nav className="footer-links" aria-label="Information links">
+          <a href="#ethics">Ethics</a>
+          <a href="#privacy">Privacy</a>
+          <a href="#support">Support</a>
+        </nav>
       </footer>
+
+      <section
+        className="policy-section"
+        id="ethics"
+        aria-labelledby="ethics-title"
+      >
+        <h2 id="ethics-title">Ethics</h2>
+        <p>
+          Article Fit is an editorial support tool, not an author, reviewer, or
+          decision-maker. Authors remain responsible for accuracy, originality,
+          citations, authorship, disclosures, and the final submission. Review
+          the target journal&apos;s own AI policy before submission.
+        </p>
+        <p>
+          AI-assisted text must be checked, rewritten where needed, and
+          disclosed when required. AI tools must never be listed as authors, and
+          scientific claims or references must not be accepted without human
+          verification.
+        </p>
+        <p className="policy-sources">
+          Reference guidance:{' '}
+          <a
+            href="https://publicationethics.org/cope-position-statements/ai-author"
+            target="_blank"
+            rel="noreferrer"
+          >
+            COPE
+          </a>
+          {' · '}
+          <a
+            href="https://www.icmje.org/recommendations/browse/artificial-intelligence/ai-use-by-authors.html"
+            target="_blank"
+            rel="noreferrer"
+          >
+            ICMJE
+          </a>
+          {' · '}
+          <a
+            href="https://publishingsupport.iopscience.iop.org/questions/generative-ai-tools/"
+            target="_blank"
+            rel="noreferrer"
+          >
+            IOP Publishing
+          </a>
+        </p>
+      </section>
+
+      <section
+        className="policy-section"
+        id="privacy"
+        aria-labelledby="privacy-title"
+      >
+        <h2 id="privacy-title">Privacy</h2>
+        <p>
+          Uploaded manuscripts and reference files are used only for the
+          requested analysis. Source uploads are deleted after processing;
+          generated files are temporary and may remain available for up to 24
+          hours. The app does not retain a personal archive of submitted
+          manuscripts.
+        </p>
+        <p>
+          Article Fit may retain compact, journal-level editorial lessons and
+          official-source summaries to improve future analyses. Do not upload
+          confidential peer-review material or data that you are not authorized
+          to process. Check the target journal&apos;s confidentiality rules
+          before use.
+        </p>
+      </section>
+
+      <section
+        className="policy-section"
+        id="support"
+        aria-labelledby="support-title"
+      >
+        <h2 id="support-title">Support</h2>
+        <p>
+          For questions, report an error or request help at{' '}
+          <a href="mailto:ai.agent.msrbr@gmail.com">ai.agent.msrbr@gmail.com</a>
+          .
+        </p>
+      </section>
     </main>
   );
 }

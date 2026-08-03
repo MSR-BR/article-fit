@@ -716,6 +716,36 @@ footer {
   font-size: 0.74rem;
   text-align: center;
 }
+.footer-links {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 0.9rem;
+}
+.footer-links a,
+.policy-section a {
+  color: #c65e4b;
+  font-weight: 700;
+}
+.policy-section {
+  margin-top: 1.5rem;
+  padding: 1.4rem 1.6rem;
+  border: 1px solid rgb(49 93 108 / 24%);
+  border-radius: 1rem;
+  background: rgb(255 244 229 / 62%);
+  color: #315d6c;
+  line-height: 1.55;
+}
+.policy-section h2 {
+  margin: 0 0 0.55rem;
+  color: #173b48;
+}
+.policy-section p {
+  margin: 0.55rem 0;
+}
+.policy-sources {
+  font-size: 0.85rem;
+}
 
 /* Dark product surface and responsive layout overrides. */
 main {
