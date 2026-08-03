@@ -1,8 +1,14 @@
 :root {
-  color-scheme: light;
+  color-scheme: dark;
   font-family: Arial, Helvetica, sans-serif;
   background: #f6f5f1;
   color: #18211d;
+}
+
+html,
+body {
+  background: #0d1513;
+  color: #edf5f0;
 }
 
 * {
@@ -137,6 +143,28 @@ h1 {
 }
 .journal-block small {
   color: #7a817d;
+}
+.article-type-block {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 1rem;
+}
+.article-type-block label {
+  font-weight: 700;
+}
+.article-type-block select {
+  width: min(100%, 24rem);
+  padding: 0.7rem;
+  font: inherit;
+  border: 1px solid #d1d2cc;
+  border-radius: 0.55rem;
+  background: #fff;
+}
+
+.article-type-block small,
+.journal-block small,
+.file-limit-notice {
+  color: #9aaba3;
 }
 
 .upload-copy {
@@ -687,6 +715,113 @@ footer {
   color: #858a86;
   font-size: 0.74rem;
   text-align: center;
+}
+
+/* Dark product surface and responsive layout overrides. */
+main {
+  width: min(1040px, calc(100% - 2rem));
+}
+.brand,
+.intro,
+.upload-panel,
+.results,
+.progress-modal,
+.auth-card {
+  color: #edf5f0;
+}
+.upload-panel,
+.result-card,
+.results,
+.auth-card {
+  border-color: #2a3a34;
+  background: #14201c;
+  box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 28%);
+}
+.lede,
+.account,
+.result-grid small,
+footer {
+  color: #a8b8b0;
+}
+.journal-block input,
+.article-type-block select,
+.assisted-grid input,
+.assisted-grid textarea,
+.feedback textarea {
+  border-color: #40564c;
+  background: #0e1815;
+  color: #edf5f0;
+}
+.journal-block input:focus,
+.article-type-block select:focus,
+.assisted-grid input:focus,
+.assisted-grid textarea:focus,
+.feedback textarea:focus {
+  border-color: #62c99a;
+  box-shadow: 0 0 0 3px rgb(98 201 154 / 18%);
+}
+.divider,
+.result-card,
+.result-download {
+  border-color: #2a3a34;
+}
+.upload-button,
+.analyze-button {
+  background: #3bb27c;
+  color: #07130e;
+}
+.upload-button.secondary,
+.reset-button {
+  border-color: #527064;
+  background: #1a2a24;
+  color: #d8e8df;
+}
+.result-download {
+  background: #1b3028;
+  color: #baf0d2;
+}
+.result-download-title {
+  color: #edf5f0;
+}
+.download-action {
+  background: #3bb27c;
+  color: #07130e;
+}
+
+@media (max-width: 640px) {
+  main {
+    width: min(100% - 1rem, 540px);
+    padding-top: 1rem;
+  }
+  .intro {
+    padding: 3.5rem 0 2rem;
+  }
+  h1 {
+    font-size: clamp(2.7rem, 15vw, 4.5rem);
+  }
+  .brand {
+    align-items: flex-start;
+  }
+  .account {
+    max-width: 48%;
+    text-align: right;
+  }
+  .upload-copy {
+    gap: 0.7rem;
+  }
+  .upload-button,
+  .analyze-button,
+  .reset-button {
+    width: 100%;
+  }
+  .result-download {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .download-action {
+    width: 100%;
+    justify-content: center;
+  }
 }
 
 .auth-shell {

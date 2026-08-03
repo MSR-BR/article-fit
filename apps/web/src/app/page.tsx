@@ -77,6 +77,7 @@ const emptyGuidance = {
   scopeUrl: '',
   guideUrl: '',
 };
+const knownJournals = ['Physical Review Letters'];
 
 type JobStatus = {
   state: string;
@@ -173,6 +174,7 @@ export default function HomePage() {
   });
   const [started, setStarted] = useState(false);
   const [journal, setJournal] = useState('');
+  const [articleType, setArticleType] = useState('regular');
   const [journalIssn, setJournalIssn] = useState('');
   const [showProgress, setShowProgress] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
@@ -297,6 +299,7 @@ export default function HomePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           idempotencyKey: crypto.randomUUID(),
+          articleType,
           ...(manualRequested && manualReady
             ? {
                 journalTitle: journal.trim(),
@@ -431,6 +434,7 @@ export default function HomePage() {
     if (runState === 'running') return;
     setUploads({ references: [], manuscript: null });
     setJournal('');
+    setArticleType('regular');
     setJournalIssn('');
     setGuidance(emptyGuidance);
     setStarted(false);
@@ -539,11 +543,36 @@ export default function HomePage() {
             onChange={(event) => setJournal(event.currentTarget.value)}
             placeholder="e.g. Physical Review Letters"
             autoComplete="organization"
+            list="known-journals"
             required
           />
+          <datalist id="known-journals">
+            {knownJournals.map((name) => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
           <small>
             Enter the journal&apos;s full name. Article Fit will find its ISSN,
             Scope, and Guide for Authors.
+          </small>
+        </div>
+
+        <div className="article-type-block">
+          <label htmlFor="article-type">Manuscript type</label>
+          <select
+            id="article-type"
+            value={articleType}
+            onChange={(event) => setArticleType(event.target.value)}
+          >
+            <option value="regular">Regular article</option>
+            <option value="perspective">Perspective</option>
+            <option value="review">Review</option>
+            <option value="letter">Letter</option>
+            <option value="other">Other</option>
+          </select>
+          <small>
+            The selected type guides the structure, tone, and expected depth of
+            the review.
           </small>
         </div>
 

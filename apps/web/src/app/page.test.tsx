@@ -127,6 +127,7 @@ describe('HomePage', () => {
     expect(fetchMock).toHaveBeenCalledTimes(6);
     expect(JSON.parse(String(fetchMock.mock.calls[5]?.[1]?.body))).toEqual({
       idempotencyKey: expect.any(String),
+      articleType: 'regular',
     });
   });
 
