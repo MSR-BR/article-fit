@@ -19,7 +19,7 @@ docker compose -p "$project_name" -f "$compose_file" --profile application up --
 
 web_health="$(curl --fail --silent http://127.0.0.1:3000/api/health)"
 api_health="$(curl --fail --silent http://127.0.0.1:8000/health)"
-worker_health="$(docker compose -p "$project_name" -f "$compose_file" --profile application run --rm worker python -m journal_matcher_worker.main --health-check)"
+worker_health="$(docker compose -p "$project_name" -f "$compose_file" --profile application run --rm worker --health-check)"
 
 printf '%s\n' "$web_health" | grep '"service":"web"' >/dev/null
 printf '%s\n' "$api_health" | grep '"service":"api"' >/dev/null

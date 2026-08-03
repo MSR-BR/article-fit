@@ -9,11 +9,9 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from fastapi import HTTPException
 from journal_matcher_api.foundation import FoundationStore, Principal
 from journal_matcher_api.hosted import HostedFoundationStore, SupabaseHttpClient, SupabaseSettings
 from journal_matcher_api.main import WorkflowRequest, execute_project_workflow
-from pydantic import ValidationError
 
 from journal_matcher_worker import __version__
 
@@ -94,7 +92,7 @@ def process_message(store: HostedFoundationStore, queue_row: dict[str, Any]) -> 
         store.delete_queue_message(message_id)
         print(json.dumps({"event": "workflow.cancelled", "jobId": job_id}, sort_keys=True), flush=True)
         return True
-    except (HTTPException, ValidationError, RuntimeError, ValueError) as error:
+    except Exception as error:  # noqa: BLE001 - every workflow failure must become a durable terminal state
         attempts = int(claimed.get("attempt_count", 1))
         terminal = attempts >= 3
         error_code = f"workflow-{getattr(error, 'status_code', 'failed')}"
