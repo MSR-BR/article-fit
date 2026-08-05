@@ -80,6 +80,7 @@ const emptyGuidance = {
   guideSnapshot: '',
 };
 const knownJournals = ['Physical Review Letters'];
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
 type JobStatus = {
   state: string;
@@ -245,6 +246,18 @@ export default function HomePage() {
 
   async function startAnalysis() {
     if (!ready || !uploads.manuscript) return;
+    const oversized = [
+      ...uploads.references.slice(0, 3),
+      uploads.manuscript,
+    ].filter((file) => file.size > MAX_FILE_BYTES);
+    if (oversized.length) {
+      setError(
+        `Remove these files before starting: ${oversized.map((file) => `${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`).join(', ')}. Each file must be 25 MB or smaller.`,
+      );
+      setRunState('failed');
+      setShowProgress(true);
+      return;
+    }
     const context: RunContext = { controller: new AbortController() };
     runContext.current = context;
     stopRequested.current = false;
@@ -472,10 +485,16 @@ export default function HomePage() {
 
   function selectReferences(event: ChangeEvent<HTMLInputElement>) {
     const references = Array.from(event.currentTarget.files ?? []);
+    const oversized = references.filter((file) => file.size > MAX_FILE_BYTES);
     setUploads((current) => ({
       ...current,
       references,
     }));
+    setError(
+      oversized.length
+        ? `Remove these files before starting: ${oversized.map((file) => `${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`).join(', ')}.`
+        : '',
+    );
   }
 
   function selectManuscript(event: ChangeEvent<HTMLInputElement>) {
@@ -484,6 +503,11 @@ export default function HomePage() {
       ...current,
       manuscript,
     }));
+    setError(
+      manuscript && manuscript.size > MAX_FILE_BYTES
+        ? `Remove ${manuscript.name} (${(manuscript.size / 1024 / 1024).toFixed(1)} MB) before starting. Each file must be 25 MB or smaller.`
+        : '',
+    );
   }
 
   async function submitFeedback(kind: string) {
