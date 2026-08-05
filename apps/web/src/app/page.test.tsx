@@ -597,4 +597,34 @@ describe('HomePage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Support' }));
     expect(screen.getByRole('dialog', { name: 'Support' })).toBeInTheDocument();
   });
+
+  it('accepts browser-assisted official page text when publishers block access', () => {
+    render(<HomePage />);
+    fireEvent.change(screen.getByLabelText('Target journal'), {
+      target: { value: 'Physical Review Letters' },
+    });
+    fireEvent.change(screen.getByLabelText('Journal ISSN'), {
+      target: { value: '0031-9007' },
+    });
+    fireEvent.change(screen.getByLabelText('Official Scope URL'), {
+      target: { value: 'https://journals.aps.org/prl/about' },
+    });
+    fireEvent.change(screen.getByLabelText('Official Guide for Authors URL'), {
+      target: { value: 'https://journals.aps.org/prl/authors' },
+    });
+    fireEvent.change(screen.getByLabelText(/Scope page text/), {
+      target: { value: 'Official scope text copied from the publisher.' },
+    });
+    fireEvent.change(screen.getByLabelText(/Guide for Authors text/), {
+      target: {
+        value: 'Official author guide text copied from the publisher.',
+      },
+    });
+    expect(screen.getByLabelText(/Scope page text/)).toHaveValue(
+      'Official scope text copied from the publisher.',
+    );
+    expect(screen.getByLabelText(/Guide for Authors text/)).toHaveValue(
+      'Official author guide text copied from the publisher.',
+    );
+  });
 });

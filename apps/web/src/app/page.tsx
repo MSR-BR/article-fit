@@ -76,6 +76,8 @@ type RunContext = {
 const emptyGuidance = {
   scopeUrl: '',
   guideUrl: '',
+  scopeSnapshot: '',
+  guideSnapshot: '',
 };
 const knownJournals = ['Physical Review Letters'];
 
@@ -200,7 +202,9 @@ export default function HomePage() {
     ? 'The server is still processing. Reconnecting to receive the latest confirmed status.'
     : (progressStages[activeStep]?.message ?? '');
 
-  const manualValues = Object.values(guidance).map((value) => value.trim());
+  const manualValues = [guidance.scopeUrl, guidance.guideUrl].map((value) =>
+    value.trim(),
+  );
   const manualRequested = Boolean(
     journalIssn.trim() || manualValues.some(Boolean),
   );
@@ -307,7 +311,15 @@ export default function HomePage() {
             ? {
                 journalTitle: journal.trim(),
                 journalIssn: journalIssn.trim().toUpperCase(),
-                ...guidance,
+                scopeUrl: guidance.scopeUrl,
+                guideUrl: guidance.guideUrl,
+                ...(guidance.scopeSnapshot.trim() &&
+                guidance.guideSnapshot.trim()
+                  ? {
+                      scopeSnapshot: guidance.scopeSnapshot,
+                      guideSnapshot: guidance.guideSnapshot,
+                    }
+                  : {}),
               }
             : {}),
         }),
@@ -644,7 +656,9 @@ export default function HomePage() {
         <summary>Only if automatic journal lookup fails</summary>
         <p>
           Normally, leave this closed. If Article Fit asks for help, provide the
-          ISSN and both official pages; no copied page text is required.
+          ISSN and both official pages. If the publisher blocks automated access
+          (for example, with a Cloudflare challenge), paste the visible text of
+          both pages below so the analysis can continue without guessing.
         </p>
         <div className="assisted-grid">
           <label>
@@ -684,6 +698,36 @@ export default function HomePage() {
                 }));
               }}
               placeholder="https://publisher.example/journal/authors"
+            />
+          </label>
+          <label className="guidance-snapshot">
+            Scope page text (only if the official page blocks access)
+            <textarea
+              value={guidance.scopeSnapshot}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                setGuidance((current) => ({
+                  ...current,
+                  scopeSnapshot: value,
+                }));
+              }}
+              placeholder="Paste the readable text from the official scope page."
+              rows={5}
+            />
+          </label>
+          <label className="guidance-snapshot">
+            Guide for Authors text (only if the official page blocks access)
+            <textarea
+              value={guidance.guideSnapshot}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                setGuidance((current) => ({
+                  ...current,
+                  guideSnapshot: value,
+                }));
+              }}
+              placeholder="Paste the readable text from the official author guide."
+              rows={5}
             />
           </label>
         </div>
