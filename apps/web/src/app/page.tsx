@@ -73,12 +73,6 @@ type RunContext = {
   jobId?: string;
 };
 
-const emptyGuidance = {
-  scopeUrl: '',
-  guideUrl: '',
-  scopeSnapshot: '',
-  guideSnapshot: '',
-};
 const knownJournals = ['Physical Review Letters'];
 // Vercel's serverless proxy rejects request bodies above roughly 4.5 MB.
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
@@ -101,20 +95,6 @@ function stageIndex(progress: number, backendStage?: string) {
   if (exact >= 0) return exact;
   const current = progressStages.findIndex((stage) => progress < stage.end);
   return current >= 0 ? current : progressStages.length - 1;
-}
-
-function sameOfficialDomain(scopeUrl: string, guideUrl: string) {
-  try {
-    const scope = new URL(scopeUrl);
-    const guide = new URL(guideUrl);
-    return (
-      scope.protocol === 'https:' &&
-      guide.protocol === 'https:' &&
-      scope.hostname.toLowerCase() === guide.hostname.toLowerCase()
-    );
-  } catch {
-    return false;
-  }
 }
 
 function workflowError(job: JobStatus) {
@@ -192,7 +172,6 @@ export default function HomePage() {
   const [started, setStarted] = useState(false);
   const [journal, setJournal] = useState('');
   const [articleType, setArticleType] = useState('regular');
-  const [journalIssn, setJournalIssn] = useState('');
   const [showProgress, setShowProgress] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
   const [overallProgress, setOverallProgress] = useState(0);
@@ -208,7 +187,6 @@ export default function HomePage() {
     'ethics' | 'privacy' | 'support' | null
   >(null);
   const [reconnecting, setReconnecting] = useState(false);
-  const [guidance, setGuidance] = useState(emptyGuidance);
   const [inputVersion, setInputVersion] = useState(0);
   const runContext = useRef<RunContext | null>(null);
   const stopRequested = useRef(false);
@@ -217,26 +195,10 @@ export default function HomePage() {
     ? 'The server is still processing. Reconnecting to receive the latest confirmed status.'
     : (progressStages[activeStep]?.message ?? '');
 
-  const manualValues = [guidance.scopeSnapshot, guidance.guideSnapshot].map(
-    (value) => value.trim(),
-  );
-  const manualRequested = Boolean(
-    journalIssn.trim() || manualValues.some(Boolean),
-  );
-  const assistedReady =
-    (manualValues.every((value) => value.length >= 500) &&
-      guidance.scopeSnapshot.trim().length >= 500 &&
-      guidance.guideSnapshot.trim().length >= 500) ||
-    (sameOfficialDomain(guidance.scopeUrl.trim(), guidance.guideUrl.trim()) &&
-      Boolean(guidance.scopeUrl.trim() && guidance.guideUrl.trim()));
-  const issnReady = /^\d{4}-\d{3}[\dXx]$/.test(journalIssn.trim());
-  const manualReady = !manualRequested || (assistedReady && issnReady);
-
   const ready =
     journal.trim().length >= 2 &&
     uploads.references.length >= 3 &&
-    uploads.manuscript !== null &&
-    manualReady;
+    uploads.manuscript !== null;
   const status = useMemo(() => {
     if (ready) {
       return started
@@ -244,9 +206,6 @@ export default function HomePage() {
         : 'Files are ready for analysis.';
     }
     if (!journal.trim()) return 'Enter the target journal to begin.';
-    if (manualRequested && !manualReady) {
-      return 'Enter the ISSN and both complete guidance texts, or clear them to use automatic discovery.';
-    }
     if (uploads.references.length > 0 && uploads.references.length < 3) {
       return `Add at least ${3 - uploads.references.length} more reference article${uploads.references.length === 2 ? '' : 's'}.`;
     }
@@ -257,7 +216,7 @@ export default function HomePage() {
       return 'Now upload at least three articles published in the target journal.';
     }
     return 'Upload both sets of files to begin.';
-  }, [journal, manualReady, manualRequested, ready, started, uploads]);
+  }, [journal, ready, started, uploads]);
 
   async function startAnalysis() {
     if (!ready || !uploads.manuscript) return;
@@ -349,22 +308,7 @@ export default function HomePage() {
         body: JSON.stringify({
           idempotencyKey: crypto.randomUUID(),
           articleType,
-          ...(manualRequested && manualReady
-            ? {
-                journalTitle: journal.trim(),
-                journalIssn: journalIssn.trim().toUpperCase(),
-                ...(guidance.scopeUrl.trim() && guidance.guideUrl.trim()
-                  ? { scopeUrl: guidance.scopeUrl, guideUrl: guidance.guideUrl }
-                  : {}),
-                ...(guidance.scopeSnapshot.trim() &&
-                guidance.guideSnapshot.trim()
-                  ? {
-                      scopeSnapshot: guidance.scopeSnapshot,
-                      guideSnapshot: guidance.guideSnapshot,
-                    }
-                  : {}),
-              }
-            : {}),
+          // Journal identity and official guidance are resolved server-side.
         }),
       });
       let workflow = initiated;
@@ -493,8 +437,6 @@ export default function HomePage() {
     setUploads({ references: [], manuscript: null });
     setJournal('');
     setArticleType('regular');
-    setJournalIssn('');
-    setGuidance(emptyGuidance);
     setStarted(false);
     setShowProgress(false);
     setActiveStep(0);
@@ -706,63 +648,11 @@ export default function HomePage() {
         </div>
       </section>
 
-      <details className="assisted-guidance">
-        <summary>Only if automatic journal lookup fails</summary>
-        <p>
-          If automatic journal lookup fails, provide the ISSN and paste the full
-          visible text of the journal Scope and Guide for Authors below. Article
-          Fit will use the supplied guidance as the journal evidence for this
-          analysis; confirm that both texts were copied from the indicated
-          journal.
-        </p>
-        <div className="assisted-grid">
-          <label>
-            Journal ISSN
-            <input
-              type="text"
-              value={journalIssn}
-              onChange={(event) => setJournalIssn(event.currentTarget.value)}
-              placeholder="e.g. 0031-9007"
-            />
-          </label>
-          <label className="guidance-snapshot">
-            Journal Scope text (required)
-            <textarea
-              value={guidance.scopeSnapshot}
-              onChange={(event) => {
-                const value = event.currentTarget.value;
-                setGuidance((current) => ({
-                  ...current,
-                  scopeSnapshot: value,
-                }));
-              }}
-              placeholder="Paste the readable text from the official scope page."
-              rows={5}
-            />
-          </label>
-          <label className="guidance-snapshot">
-            Guide for Authors text (required)
-            <textarea
-              value={guidance.guideSnapshot}
-              onChange={(event) => {
-                const value = event.currentTarget.value;
-                setGuidance((current) => ({
-                  ...current,
-                  guideSnapshot: value,
-                }));
-              }}
-              placeholder="Paste the readable text from the official author guide."
-              rows={5}
-            />
-          </label>
-        </div>
-        {manualRequested && !manualReady && (
-          <small className="file-limit-notice">
-            Enter the ISSN and both complete guidance texts (at least 500
-            characters each), or clear them to return to automatic lookup.
-          </small>
-        )}
-      </details>
+      <p className="file-limit-notice guidance-note">
+        Article Fit identifies the journal from its name, retrieves its official
+        Scope and Guide for Authors, and sends that evidence to Gemini for the
+        editorial analysis.
+      </p>
 
       <p className={`status ${ready ? 'ready' : ''}`} role="status">
         <span aria-hidden="true" />

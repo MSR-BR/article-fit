@@ -32,9 +32,6 @@ function completePackage() {
       ],
     },
   });
-  fireEvent.click(
-    screen.getByText('Only if automatic journal lookup fails'),
-  );
 }
 
 describe('HomePage', () => {
@@ -61,10 +58,6 @@ describe('HomePage', () => {
       'multiple',
     );
     expect(screen.getByLabelText('Target journal')).toBeRequired();
-    expect(screen.getByLabelText('Journal ISSN')).not.toBeRequired();
-    expect(
-      screen.getByText('Only if automatic journal lookup fails'),
-    ).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Start analysis' }),
     ).toBeDisabled();
@@ -424,7 +417,6 @@ describe('HomePage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reset form' }));
 
     expect(screen.getByLabelText('Target journal')).toHaveValue('');
-    expect(screen.getByLabelText('Journal ISSN')).toHaveValue('');
     expect(screen.queryByText('referencia-1.pdf')).toBeNull();
     expect(
       screen.getByRole('button', { name: 'Start analysis' }),
@@ -522,64 +514,6 @@ describe('HomePage', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('requires a complete optional recovery package only when one field is used', () => {
-    render(<HomePage />);
-    completePackage();
-    fireEvent.change(screen.getByLabelText('Journal ISSN'), {
-      target: { value: '0031-9007' },
-    });
-    expect(
-      screen.getByRole('button', { name: 'Start analysis' }),
-    ).toBeDisabled();
-    expect(screen.getByRole('status')).toHaveTextContent(
-      'Enter the ISSN and both complete guidance texts',
-    );
-    fireEvent.change(screen.getByLabelText(/Scope text/), {
-      target: { value: 'scope '.repeat(100) },
-    });
-    fireEvent.change(screen.getByLabelText(/Guide for Authors text/), {
-      target: { value: 'guide '.repeat(100) },
-    });
-    expect(
-      screen.getByRole('button', { name: 'Start analysis' }),
-    ).toBeEnabled();
-  });
-
-  it('sends optional verified identity only when manual recovery is complete', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse({ id: 'project-manual' }))
-      .mockResolvedValueOnce(jsonResponse({ id: 'reference-1' }))
-      .mockResolvedValueOnce(jsonResponse({ id: 'reference-2' }))
-      .mockResolvedValueOnce(jsonResponse({ id: 'reference-3' }))
-      .mockResolvedValueOnce(jsonResponse({ id: 'manuscript' }))
-      .mockResolvedValueOnce(
-        jsonResponse({ analysisId: 'analysis-manual', artifacts: [] }),
-      );
-    vi.stubGlobal('fetch', fetchMock);
-    render(<HomePage />);
-    completePackage();
-    fireEvent.change(screen.getByLabelText('Journal ISSN'), {
-      target: { value: '0031-9007' },
-    });
-    fireEvent.change(screen.getByLabelText(/Scope text/), {
-      target: { value: 'scope '.repeat(100) },
-    });
-    fireEvent.change(screen.getByLabelText(/Guide for Authors text/), {
-      target: { value: 'guide '.repeat(100) },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Start analysis' }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6));
-    expect(
-      JSON.parse(String(fetchMock.mock.calls[5]?.[1]?.body)),
-    ).toMatchObject({
-      journalTitle: 'Physical Review Letters',
-      journalIssn: '0031-9007',
-      scopeSnapshot: expect.any(String),
-      guideSnapshot: expect.any(String),
-    });
-  });
-
   it('opens policy dialogs and closes them with the close button or backdrop', () => {
     render(<HomePage />);
 
@@ -594,36 +528,5 @@ describe('HomePage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Support' }));
     expect(screen.getByRole('dialog', { name: 'Support' })).toBeInTheDocument();
-  });
-
-  it('accepts browser-assisted official page text when publishers block access', () => {
-    render(<HomePage />);
-    fireEvent.click(
-      screen.getByText('Only if automatic journal lookup fails'),
-    );
-    fireEvent.change(screen.getByLabelText('Target journal'), {
-      target: { value: 'Physical Review Letters' },
-    });
-    fireEvent.change(screen.getByLabelText('Journal ISSN'), {
-      target: { value: '0031-9007' },
-    });
-    fireEvent.change(screen.getByLabelText(/Scope text/), {
-      target: {
-        value: 'Official scope text copied from the publisher. '.repeat(12),
-      },
-    });
-    fireEvent.change(screen.getByLabelText(/Guide for Authors text/), {
-      target: {
-        value: 'Official author guide text copied from the publisher. '.repeat(
-          12,
-        ),
-      },
-    });
-    expect(screen.getByLabelText(/Scope text/)).toHaveValue(
-      'Official scope text copied from the publisher. '.repeat(12),
-    );
-    expect(screen.getByLabelText(/Guide for Authors text/)).toHaveValue(
-      'Official author guide text copied from the publisher. '.repeat(12),
-    );
   });
 });
