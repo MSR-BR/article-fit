@@ -514,7 +514,7 @@ describe('HomePage', () => {
     completePackage();
     fireEvent.click(screen.getByRole('button', { name: 'Start analysis' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Review the fields and uploaded files',
+      'The journal could not be confirmed.',
     );
     expect(
       screen.getByRole('button', { name: 'Start analysis' }),

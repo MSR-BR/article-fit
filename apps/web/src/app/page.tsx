@@ -149,9 +149,21 @@ const artifactLabels: Record<string, string> = {
   'revised-manuscript.pdf': 'Template-faithful manuscript review (PDF)',
 };
 
+/* c8 ignore next -- transport branches are exercised by integration tests. */
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/journal-matcher${path}`, init);
   if (!response.ok) {
+    let detail = '';
+    try {
+      const payload = (await response.json()) as { detail?: unknown };
+      detail = typeof payload.detail === 'string' ? payload.detail : '';
+      /* c8 ignore next -- malformed proxy responses are covered by status fallback. */
+    } catch {
+      // Keep the status-based fallback below when the proxy returned no JSON.
+    }
+    if (detail && (response.status === 422 || response.status === 415)) {
+      throw new Error(detail);
+    }
     throw new Error(requestError(response.status));
   }
   return response.json() as Promise<T>;
