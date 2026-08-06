@@ -81,7 +81,7 @@ const emptyGuidance = {
 };
 const knownJournals = ['Physical Review Letters'];
 // Vercel's serverless proxy rejects request bodies above roughly 4.5 MB.
-const MAX_FILE_BYTES = 4_000_000;
+const MAX_FILE_BYTES = 4 * 1024 * 1024;
 
 type JobStatus = {
   state: string;
@@ -134,7 +134,7 @@ function workflowError(job: JobStatus) {
 
 function requestError(status: number) {
   if (status === 413)
-    return 'The upload service rejected this file because it is too large for the current connection. Select a PDF smaller than 4 MB.';
+    return 'The upload service rejected this file because it is too large for the current connection. Select a PDF smaller than 4 MiB.';
   if (status === 415)
     return 'One file has an incompatible format. Use PDF for reference articles and PDF or Word for the manuscript.';
   if (status === 422)
@@ -253,7 +253,7 @@ export default function HomePage() {
     );
     if (oversized.length) {
       setError(
-        `Remove these files before starting: ${oversized.map((file) => `${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`).join(', ')}. Each file must be smaller than 4 MB.`,
+        `Remove these files before starting: ${oversized.map((file) => `${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MiB)`).join(', ')}. Each file must be smaller than 4 MiB (4,194,304 bytes).`,
       );
       // This is a client-side validation error, not a workflow failure.
       // Keep the form visible so the user can replace the file immediately.
@@ -311,7 +311,7 @@ export default function HomePage() {
             uploadError.message.includes('25 MB')
           ) {
             throw new Error(
-              `The file “${file.name}” is too large for the current upload connection (${(file.size / 1024 / 1024).toFixed(1)} MB). Select a file smaller than 4 MB.`,
+              `The file “${file.name}” is too large for the current upload connection (${(file.size / 1024 / 1024).toFixed(2)} MiB). Select a file smaller than 4 MiB.`,
             );
           }
           throw uploadError;
@@ -521,7 +521,7 @@ export default function HomePage() {
     }));
     setError(
       manuscript && manuscript.size > MAX_FILE_BYTES
-        ? `Remove ${manuscript.name} (${(manuscript.size / 1024 / 1024).toFixed(1)} MB) before starting. Each file must be smaller than 4 MB.`
+        ? `Remove ${manuscript.name} (${(manuscript.size / 1024 / 1024).toFixed(2)} MiB) before starting. Each file must be smaller than 4 MiB (4,194,304 bytes).`
         : '',
     );
   }

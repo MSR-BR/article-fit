@@ -1120,9 +1120,11 @@ h1 {
 .upload-button.secondary:hover {
   background: #ffc096;
 }
-.status,
-.status.error {
+.status {
   color: #315d6c;
+}
+.status.error {
+  color: #9f2d2d;
 }
 .status.ready {
   color: #173b48;
