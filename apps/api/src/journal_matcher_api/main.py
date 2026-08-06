@@ -111,8 +111,8 @@ class StartJob(BaseModel):
 
 
 class ResearchRequest(BaseModel):
-    scope_url: str = Field(alias="scopeUrl", pattern=r"^https://")
-    guide_url: str = Field(alias="guideUrl", pattern=r"^https://")
+    scope_url: str | None = Field(alias="scopeUrl", default=None, pattern=r"^https://")
+    guide_url: str | None = Field(alias="guideUrl", default=None, pattern=r"^https://")
     expected_profile_version: int = Field(alias="expectedProfileVersion", ge=0, default=0)
     scope_snapshot: str | None = Field(alias="scopeSnapshot", default=None, min_length=500, max_length=200_000)
     guide_snapshot: str | None = Field(alias="guideSnapshot", default=None, min_length=500, max_length=200_000)
@@ -531,8 +531,8 @@ async def execute_project_workflow(
     research = await _research_journal(
         project_id,
         ResearchRequest(
-            scopeUrl=str(resolved["scopeUrl"]),
-            guideUrl=str(resolved["guideUrl"]),
+            scopeUrl=resolved.get("scopeUrl"),
+            guideUrl=resolved.get("guideUrl"),
             expectedProfileVersion=current_profile_version,
             scopeSnapshot=payload.scope_snapshot,
             guideSnapshot=payload.guide_snapshot,
