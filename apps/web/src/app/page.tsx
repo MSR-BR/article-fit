@@ -80,8 +80,8 @@ const emptyGuidance = {
   guideSnapshot: '',
 };
 const knownJournals = ['Physical Review Letters'];
-// Keep a small margin below the API's 25 MiB transport limit.
-const MAX_FILE_BYTES = 25_000_000;
+// Vercel's serverless proxy rejects request bodies above roughly 4.5 MB.
+const MAX_FILE_BYTES = 4_000_000;
 
 type JobStatus = {
   state: string;
@@ -133,7 +133,8 @@ function workflowError(job: JobStatus) {
 }
 
 function requestError(status: number) {
-  if (status === 413) return 'One file exceeds the 25 MB limit.';
+  if (status === 413)
+    return 'The upload service rejected this file because it is too large for the current connection. Select a PDF smaller than 4 MB.';
   if (status === 415)
     return 'One file has an incompatible format. Use PDF for reference articles and PDF or Word for the manuscript.';
   if (status === 422)
@@ -252,7 +253,7 @@ export default function HomePage() {
     );
     if (oversized.length) {
       setError(
-        `Remove these files before starting: ${oversized.map((file) => `${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`).join(', ')}. Each file must be 25 MB or smaller.`,
+        `Remove these files before starting: ${oversized.map((file) => `${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`).join(', ')}. Each file must be smaller than 4 MB.`,
       );
       setRunState('failed');
       setShowProgress(true);
@@ -307,7 +308,7 @@ export default function HomePage() {
             uploadError.message.includes('25 MB')
           ) {
             throw new Error(
-              `The file “${file.name}” is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Remove it and select a file smaller than 25 MB.`,
+              `The file “${file.name}” is too large for the current upload connection (${(file.size / 1024 / 1024).toFixed(1)} MB). Select a file smaller than 4 MB.`,
             );
           }
           throw uploadError;
@@ -517,7 +518,7 @@ export default function HomePage() {
     }));
     setError(
       manuscript && manuscript.size > MAX_FILE_BYTES
-        ? `Remove ${manuscript.name} (${(manuscript.size / 1024 / 1024).toFixed(1)} MB) before starting. Each file must be 25 MB or smaller.`
+        ? `Remove ${manuscript.name} (${(manuscript.size / 1024 / 1024).toFixed(1)} MB) before starting. Each file must be smaller than 4 MB.`
         : '',
     );
   }
