@@ -255,8 +255,11 @@ export default function HomePage() {
       setError(
         `Remove these files before starting: ${oversized.map((file) => `${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`).join(', ')}. Each file must be smaller than 4 MB.`,
       );
-      setRunState('failed');
-      setShowProgress(true);
+      // This is a client-side validation error, not a workflow failure.
+      // Keep the form visible so the user can replace the file immediately.
+      setRunState('idle');
+      setStarted(false);
+      setShowProgress(false);
       return;
     }
     const context: RunContext = { controller: new AbortController() };
