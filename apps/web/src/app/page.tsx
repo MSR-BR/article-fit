@@ -264,12 +264,20 @@ export default function HomePage() {
         { file: uploads.manuscript, slot: 'manuscript' },
       ];
       for (const [index, { file, slot }] of documents.entries()) {
+        const uploadController = new AbortController();
+        const uploadTimeout = window.setTimeout(
+          () => uploadController.abort(),
+          120_000,
+        );
         try {
           await api(
             `/projects/${project.id}/documents/${slot}?filename=${encodeURIComponent(file.name)}`,
             {
               method: 'PUT',
-              signal: context.controller.signal,
+              signal: AbortSignal.any([
+                context.controller.signal,
+                uploadController.signal,
+              ]),
               headers: {
                 'Content-Type': 'application/octet-stream',
                 'X-Document-Media-Type': file.type,
@@ -286,7 +294,17 @@ export default function HomePage() {
               `The file “${file.name}” is too large for the current upload connection (${(file.size / 1024 / 1024).toFixed(2)} MiB). Select a file smaller than 4 MiB.`,
             );
           }
+          if (
+            uploadController.signal.aborted &&
+            !context.controller.signal.aborted
+          ) {
+            throw new Error(
+              `The upload of “${file.name}” timed out. Check your connection and try again with a smaller file.`,
+            );
+          }
           throw uploadError;
+        } finally {
+          window.clearTimeout(uploadTimeout);
         }
         setOverallProgress(
           8 + Math.round(((index + 1) / documents.length) * 17),
