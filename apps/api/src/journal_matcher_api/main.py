@@ -655,12 +655,37 @@ async def _research_journal(
                 return cached, "cached-official"
             raise
 
+    guidance_warnings: list[str] = []
     if payload.scope_snapshot and payload.guide_snapshot and not payload.scope_url and not payload.guide_url:
         scope_text, scope_access = payload.scope_snapshot, "browser-assisted"
         guide_text, guide_access = payload.guide_snapshot, "browser-assisted"
     else:
-        scope_text, scope_access = acquire_guidance(payload.scope_url, "official-scope", payload.scope_snapshot)
-        guide_text, guide_access = acquire_guidance(payload.guide_url, "official-guide", payload.guide_snapshot)
+        try:
+            scope_text, scope_access = acquire_guidance(payload.scope_url, "official-scope", payload.scope_snapshot)
+            guide_text, guide_access = acquire_guidance(payload.guide_url, "official-guide", payload.guide_snapshot)
+        except HTTPException:
+            # Publisher pages frequently block server-side requests. Use Gemini as a bounded,
+            # explicitly unverified fallback so the user is not forced to paste publisher text.
+            try:
+                guidance = GeminiEditorialClient().retrieve_journal_guidance(
+                    str(journal["title"]), str(journal.get("issn") or "")
+                ).response
+            except (GeminiConfigurationError, GeminiProviderError, ValueError) as error:
+                raise HTTPException(
+                    status_code=502,
+                    detail="Journal guidance could not be obtained automatically. Please retry later.",
+                ) from error
+            if len(guidance.scope_text.strip()) < 300 or len(guidance.guide_text.strip()) < 300:
+                raise HTTPException(
+                    status_code=502,
+                    detail="Gemini could not obtain complete journal guidance. Please retry later.",
+                )
+            scope_text, guide_text = guidance.scope_text, guidance.guide_text
+            scope_access = guide_access = "gemini-generated-unverified"
+            guidance_warnings.append(
+                "The publisher pages were inaccessible. Scope and Guide for Authors were recovered by Gemini "
+                "as an unverified fallback; verify the current official guidance before submission."
+            )
     evidence = [
         make_evidence(
             "official-scope",
@@ -679,7 +704,6 @@ async def _research_journal(
             access_status=guide_access,
         ),
     ]
-    guidance_warnings = []
     if "cached-official" in {scope_access, guide_access}:
         guidance_warnings.append(
             "The publisher blocked automated access during this run; the latest validated official snapshots "

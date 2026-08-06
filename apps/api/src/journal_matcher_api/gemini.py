@@ -129,6 +129,18 @@ class JournalMemoryResponse(BaseModel):
     limitations: list[str] = Field(max_length=10)
 
 
+class JournalGuidanceResponse(BaseModel):
+    """Guidance recovered by Gemini when publisher pages cannot be fetched."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    journal_title: str = Field(alias="journalTitle", min_length=2, max_length=300)
+    scope_text: str = Field(alias="scopeText", min_length=300, max_length=80_000)
+    guide_text: str = Field(alias="guideText", min_length=300, max_length=120_000)
+    source_urls: list[str] = Field(alias="sourceUrls", max_length=10)
+    limitations: list[str] = Field(max_length=10)
+
+
 @dataclass(frozen=True)
 class GeminiResult:
     model: str
@@ -145,6 +157,12 @@ class GeminiFeedbackResult:
 class GeminiMemoryResult:
     model: str
     response: JournalMemoryResponse
+
+
+@dataclass(frozen=True)
+class GeminiGuidanceResult:
+    model: str
+    response: JournalGuidanceResponse
 
 
 MAX_PROMPT_CHARACTERS = 180_000
@@ -264,6 +282,7 @@ def _compact_editorial_package(package: dict[str, object], *, aggressive: bool =
 def build_editorial_prompt(
     *,
     journal_title: str,
+    article_type: str = "regular",
     manuscript_segments: list[dict[str, object]],
     profile_claims: list[dict[str, object]],
     official_rules: list[dict[str, object]],
@@ -311,6 +330,7 @@ def build_editorial_prompt(
         )
     package: dict[str, object] = {
         "journalTitle": journal_title[:300],
+        "articleType": article_type,
         "allowedSourceIds": sorted(source_ids),
         "officialRules": official_rules,
         "observedJournalProfileClaims": profile_claims,
@@ -320,7 +340,11 @@ def build_editorial_prompt(
         "manuscriptBibliographyAndRecentLiterature": literature[:80],
         "manuscriptSegments": segments,
     }
-    instructions = """You are a senior scholarly editor and experienced scientific referee. Compare the manuscript
+    instructions = f"""You are a senior scholarly editor and experienced scientific referee. The submitted manuscript
+type is {article_type!r}. Apply the structure, length, rhetoric, evidence threshold, and section expectations
+appropriate to that type. A regular article should foreground an original result; a perspective should synthesize
+and frame a field; a review should provide balanced, comprehensive coverage; a letter should be concise and lead
+with a focused result; other types require explicit author validation against the guide. Compare the manuscript
 with the supplied
 journal requirements and observed publication patterns. Review form, structure, layout, language, argument
 architecture, methods presentation, results presentation, conclusions, abstract, and scientific depth.
@@ -592,6 +616,19 @@ RESPONSE_SCHEMA: dict[str, object] = {
     },
 }
 
+GUIDANCE_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["journalTitle", "scopeText", "guideText", "sourceUrls", "limitations"],
+    "properties": {
+        "journalTitle": {"type": "string", "maxLength": 300},
+        "scopeText": {"type": "string", "minLength": 300, "maxLength": 80000},
+        "guideText": {"type": "string", "minLength": 300, "maxLength": 120000},
+        "sourceUrls": {"type": "array", "maxItems": 10, "items": {"type": "string", "maxLength": 2000}},
+        "limitations": {"type": "array", "maxItems": 10, "items": {"type": "string", "maxLength": 1000}},
+    },
+}
+
 
 FEEDBACK_SCHEMA: dict[str, object] = {
     "type": "object",
@@ -858,6 +895,29 @@ class GeminiEditorialClient:
                 f"Gemini returned invalid structured editorial output ({diagnostics[:500]})"
             ) from None
         return GeminiResult(model=model, response=editorial)
+
+    def retrieve_journal_guidance(self, journal_title: str, issn: str | None = None) -> GeminiGuidanceResult:
+        """Recover bounded guidance when publisher pages are unavailable."""
+        prompt = (
+            "You are a scholarly publishing research assistant. Identify the journal named below and provide "
+            "the most complete current Scope and Guide for Authors text you can verify from publicly available "
+            "knowledge. Do not invent publisher rules, URLs, limits, or sections. If exact wording is unavailable, "
+            "provide a clearly qualified summary and list limitations. Return plain text under scopeText and "
+            "guideText. Include sourceUrls only when confident they are official pages. This is an AI fallback "
+            "after an official-page fetch failed and MUST be verified by the author before submission.\n\n"
+            f"JOURNAL: {journal_title[:300]}\nISSN: {(issn or 'unknown')[:40]}\n"
+            "Return only the requested JSON schema."
+        )
+        model, raw = self._generate_json(prompt, GUIDANCE_SCHEMA)
+        try:
+            guidance = JournalGuidanceResponse.model_validate(raw)
+        except ValidationError as error:
+            diagnostics = ", ".join(
+                f"{'.'.join(str(part) for part in item['loc'])}:{item['type']}"
+                for item in error.errors(include_input=False)
+            )
+            raise GeminiProviderError(f"Gemini returned invalid journal guidance ({diagnostics[:500]})") from None
+        return GeminiGuidanceResult(model=model, response=guidance)
 
     def analyze_feedback(self, prompt: str) -> GeminiFeedbackResult:
         model, raw = self._generate_json(prompt, FEEDBACK_SCHEMA)

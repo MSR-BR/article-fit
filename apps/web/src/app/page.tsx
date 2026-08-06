@@ -100,7 +100,7 @@ function stageIndex(progress: number, backendStage?: string) {
 function workflowError(job: JobStatus) {
   const code = job.errorCode ?? 'workflow-failed';
   return code.includes('502')
-    ? 'The official journal pages could not be read automatically. Open “Only if automatic journal lookup fails”, provide both official URLs, and paste the visible Scope and Guide for Authors text if the publisher blocks access.'
+    ? 'Journal guidance could not be obtained automatically. Article Fit uses Gemini as a fallback; wait a few minutes and try again.'
     : code.includes('503')
       ? 'The service is temporarily unavailable. Wait a few minutes and try again.'
       : code.includes('422')
