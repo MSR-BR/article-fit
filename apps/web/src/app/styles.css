@@ -702,6 +702,10 @@ h2 {
   background: #176348;
   border-radius: 0.5rem;
 }
+.feedback textarea::placeholder {
+  color: #53645d;
+  opacity: 1;
+}
 .download-icon {
   font-size: 1.2rem;
   line-height: 1;
@@ -871,6 +875,14 @@ footer {
 .download-action {
   background: #3bb27c;
   color: #07130e;
+}
+.feedback textarea::placeholder {
+  color: #52685f;
+}
+.feedback button:disabled {
+  color: #496057;
+  background: #b8c8c0;
+  border-color: #91a69c;
 }
 
 @media (max-width: 640px) {

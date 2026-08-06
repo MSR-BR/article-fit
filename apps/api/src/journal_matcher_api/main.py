@@ -983,7 +983,9 @@ async def create_analysis(
     anchors = manuscript["anchors"]
     anchor = str(anchors[0]) if isinstance(anchors, list) and anchors else "document"
     segments = cast(list[dict[str, str]], manuscript.get("segments", []))
-    recommendations = build_recommendations(manuscript_text, profile, rules, anchor, segments)
+    recommendations = build_recommendations(
+        manuscript_text, profile, rules, anchor, segments, journal_title=str(journal["title"])
+    )
     limitations = ["Heuristic qualitative review is enabled; expert scientific validation remains required."]
     repository = analysis_repository(store)
     repository.migrate()

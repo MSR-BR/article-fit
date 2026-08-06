@@ -176,6 +176,7 @@ def build_recommendations(
     rules: list[dict[str, object]],
     anchor: str,
     manuscript_segments: list[dict[str, str]] | None = None,
+    journal_title: str = "the target journal",
 ) -> list[dict[str, object]]:
     folded = manuscript_text.casefold()
     prompt_like_upload = any(
@@ -248,7 +249,7 @@ def build_recommendations(
                     "journal-format",
                     "required",
                     f"The extracted core contains approximately {word_count} words; "
-                    f"PRL limits a Letter's core to {limit} words.",
+                    f"{journal_title} limits this manuscript type's core to {limit} words.",
                     "official-requirement",
                     source_ids,
                     "Reduce the core to the official limit; move specialist derivations to End Matter or "
@@ -362,8 +363,8 @@ def build_recommendations(
             "title-central-result",
             "language",
             "strongly-recommended",
-            "PRL asks titles to convey the most important and interesting result; the current title names "
-            "the method but not the central coherence result.",
+            f"{journal_title} expects the title to convey the most important result; the current title may not "
+            "foreground the central result.",
             "expert-suggestion",
             [],
             "Rewrite the title to foreground the demonstrated decomposition of coherence into heat and work; "
@@ -379,8 +380,8 @@ def build_recommendations(
             "abstract-concision",
             "language",
             "strongly-recommended",
-            f"The abstract contains approximately {abstract_words} words; PRL asks for a concise statement "
-            "of the principal result for a broad readership.",
+            f"The abstract contains approximately {abstract_words} words; {journal_title} expects a concise "
+            "statement of the principal result for its readership.",
             "expert-suggestion",
             [],
             "Compress background and repeated interpretation while retaining the problem, method, principal "
@@ -396,8 +397,8 @@ def build_recommendations(
             "introduction-broad-reader",
             "structure",
             "strongly-recommended",
-            f"The extracted Introduction is approximately {intro_words} words, which competes with the space "
-            "available for the central PRL result.",
+            f"The extracted Introduction is approximately {intro_words} words, which may compete with the "
+            f"space available for the central {journal_title} result.",
             "expert-suggestion",
             [],
             "Condense the field survey, identify the unresolved contradiction earlier, and state the paper's "
@@ -461,7 +462,7 @@ def build_recommendations(
             "scientific-limitations",
             "scientific-concern",
             "question",
-            "PRL readers need to know how general the claimed resolution of the quantum first-law inconsistency is.",
+            f"Readers of {journal_title} need to know how general the central claim is.",
             "expert-suggestion",
             [],
             "State the assumptions and boundaries explicitly: coupling/dynamical regime, differentiability, "
@@ -474,7 +475,7 @@ def build_recommendations(
             "conclusion-outlook",
             "structure",
             "optional",
-            "The official PRL guidance asks the conclusion to summarize results and point to future directions.",
+            f"The official {journal_title} guidance asks the conclusion to summarize results and point to future directions.",
             "expert-suggestion",
             [],
             "Add one restrained outlook sentence identifying the most consequential test or extension, "
@@ -490,8 +491,8 @@ def build_recommendations(
         "Scope fit requires scientific judgment and cannot be established from keyword overlap alone.",
         "expert-suggestion",
         [],
-        "Explain which PRL acceptance criterion is met and why the heat/work decomposition will influence "
-        "researchers beyond the immediate quantum-thermodynamics specialty.",
+        f"Explain which {journal_title} acceptance and scope expectations are met and why the result matters "
+        "beyond the immediate specialty.",
         True,
         original="" if prompt_like_upload else abstract[:400],
     )
