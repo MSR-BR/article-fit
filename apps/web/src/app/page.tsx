@@ -120,7 +120,7 @@ function sameOfficialDomain(scopeUrl: string, guideUrl: string) {
 function workflowError(job: JobStatus) {
   const code = job.errorCode ?? 'workflow-failed';
   return code.includes('502')
-    ? 'Automatic journal lookup could not be completed. Wait a few minutes and try again. If it repeats, open “Only if automatic journal lookup fails” and provide the ISSN and official pages.'
+    ? 'The official journal pages could not be read automatically. Open “Only if automatic journal lookup fails”, provide both official URLs, and paste the visible Scope and Guide for Authors text if the publisher blocks access.'
     : code.includes('503')
       ? 'The service is temporarily unavailable. Wait a few minutes and try again.'
       : code.includes('422')

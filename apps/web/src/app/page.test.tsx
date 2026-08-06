@@ -248,7 +248,7 @@ describe('HomePage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Start analysis' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Wait a few minutes and try again',
+      'official journal pages could not be read',
     );
     expect(screen.getByRole('alert')).not.toHaveTextContent('workflow-502');
     expect(screen.getByRole('alert')).not.toHaveTextContent('provedor de IA');
