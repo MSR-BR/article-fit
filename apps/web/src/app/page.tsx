@@ -80,7 +80,8 @@ const emptyGuidance = {
   guideSnapshot: '',
 };
 const knownJournals = ['Physical Review Letters'];
-const MAX_FILE_BYTES = 25 * 1024 * 1024;
+// Keep a small margin below the API's 25 MiB transport limit.
+const MAX_FILE_BYTES = 25_000_000;
 
 type JobStatus = {
   state: string;
@@ -246,10 +247,9 @@ export default function HomePage() {
 
   async function startAnalysis() {
     if (!ready || !uploads.manuscript) return;
-    const oversized = [
-      ...uploads.references.slice(0, 3),
-      uploads.manuscript,
-    ].filter((file) => file.size > MAX_FILE_BYTES);
+    const oversized = [...uploads.references, uploads.manuscript].filter(
+      (file) => file.size > MAX_FILE_BYTES,
+    );
     if (oversized.length) {
       setError(
         `Remove these files before starting: ${oversized.map((file) => `${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB)`).join(', ')}. Each file must be 25 MB or smaller.`,
@@ -288,18 +288,30 @@ export default function HomePage() {
         { file: uploads.manuscript, slot: 'manuscript' },
       ];
       for (const [index, { file, slot }] of documents.entries()) {
-        await api(
-          `/projects/${project.id}/documents/${slot}?filename=${encodeURIComponent(file.name)}`,
-          {
-            method: 'PUT',
-            signal: context.controller.signal,
-            headers: {
-              'Content-Type': 'application/octet-stream',
-              'X-Document-Media-Type': file.type,
+        try {
+          await api(
+            `/projects/${project.id}/documents/${slot}?filename=${encodeURIComponent(file.name)}`,
+            {
+              method: 'PUT',
+              signal: context.controller.signal,
+              headers: {
+                'Content-Type': 'application/octet-stream',
+                'X-Document-Media-Type': file.type,
+              },
+              body: file,
             },
-            body: file,
-          },
-        );
+          );
+        } catch (uploadError) {
+          if (
+            uploadError instanceof Error &&
+            uploadError.message.includes('25 MB')
+          ) {
+            throw new Error(
+              `The file “${file.name}” is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Remove it and select a file smaller than 25 MB.`,
+            );
+          }
+          throw uploadError;
+        }
         setOverallProgress(
           8 + Math.round(((index + 1) / documents.length) * 17),
         );
