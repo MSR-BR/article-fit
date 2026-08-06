@@ -217,17 +217,18 @@ export default function HomePage() {
     ? 'The server is still processing. Reconnecting to receive the latest confirmed status.'
     : (progressStages[activeStep]?.message ?? '');
 
-  const manualValues = [guidance.scopeUrl, guidance.guideUrl].map((value) =>
-    value.trim(),
+  const manualValues = [guidance.scopeSnapshot, guidance.guideSnapshot].map(
+    (value) => value.trim(),
   );
   const manualRequested = Boolean(
     journalIssn.trim() || manualValues.some(Boolean),
   );
-  const officialUrlsReady = sameOfficialDomain(
-    guidance.scopeUrl.trim(),
-    guidance.guideUrl.trim(),
-  );
-  const assistedReady = manualValues.every(Boolean) && officialUrlsReady;
+  const assistedReady =
+    (manualValues.every((value) => value.length >= 500) &&
+      guidance.scopeSnapshot.trim().length >= 500 &&
+      guidance.guideSnapshot.trim().length >= 500) ||
+    (sameOfficialDomain(guidance.scopeUrl.trim(), guidance.guideUrl.trim()) &&
+      Boolean(guidance.scopeUrl.trim() && guidance.guideUrl.trim()));
   const issnReady = /^\d{4}-\d{3}[\dXx]$/.test(journalIssn.trim());
   const manualReady = !manualRequested || (assistedReady && issnReady);
 
@@ -244,7 +245,7 @@ export default function HomePage() {
     }
     if (!journal.trim()) return 'Enter the target journal to begin.';
     if (manualRequested && !manualReady) {
-      return 'Complete all optional recovery fields, or clear them to use automatic discovery.';
+      return 'Enter the ISSN and both complete guidance texts, or clear them to use automatic discovery.';
     }
     if (uploads.references.length > 0 && uploads.references.length < 3) {
       return `Add at least ${3 - uploads.references.length} more reference article${uploads.references.length === 2 ? '' : 's'}.`;
@@ -352,8 +353,9 @@ export default function HomePage() {
             ? {
                 journalTitle: journal.trim(),
                 journalIssn: journalIssn.trim().toUpperCase(),
-                scopeUrl: guidance.scopeUrl,
-                guideUrl: guidance.guideUrl,
+                ...(guidance.scopeUrl.trim() && guidance.guideUrl.trim()
+                  ? { scopeUrl: guidance.scopeUrl, guideUrl: guidance.guideUrl }
+                  : {}),
                 ...(guidance.scopeSnapshot.trim() &&
                 guidance.guideSnapshot.trim()
                   ? {
@@ -707,10 +709,11 @@ export default function HomePage() {
       <details className="assisted-guidance">
         <summary>Only if automatic journal lookup fails</summary>
         <p>
-          Normally, leave this closed. If Article Fit asks for help, provide the
-          ISSN and both official pages. If the publisher blocks automated access
-          (for example, with a Cloudflare challenge), paste the visible text of
-          both pages below so the analysis can continue without guessing.
+          If automatic journal lookup fails, provide the ISSN and paste the full
+          visible text of the journal Scope and Guide for Authors below. Article
+          Fit will use the supplied guidance as the journal evidence for this
+          analysis; confirm that both texts were copied from the indicated
+          journal.
         </p>
         <div className="assisted-grid">
           <label>
@@ -722,38 +725,8 @@ export default function HomePage() {
               placeholder="e.g. 0031-9007"
             />
           </label>
-          <label>
-            Official Scope URL
-            <input
-              type="url"
-              value={guidance.scopeUrl}
-              onChange={(event) => {
-                const value = event.currentTarget.value;
-                setGuidance((current) => ({
-                  ...current,
-                  scopeUrl: value,
-                }));
-              }}
-              placeholder="https://publisher.example/journal/scope"
-            />
-          </label>
-          <label>
-            Official Guide for Authors URL
-            <input
-              type="url"
-              value={guidance.guideUrl}
-              onChange={(event) => {
-                const value = event.currentTarget.value;
-                setGuidance((current) => ({
-                  ...current,
-                  guideUrl: value,
-                }));
-              }}
-              placeholder="https://publisher.example/journal/authors"
-            />
-          </label>
           <label className="guidance-snapshot">
-            Scope page text (only if the official page blocks access)
+            Journal Scope text (required)
             <textarea
               value={guidance.scopeSnapshot}
               onChange={(event) => {
@@ -768,7 +741,7 @@ export default function HomePage() {
             />
           </label>
           <label className="guidance-snapshot">
-            Guide for Authors text (only if the official page blocks access)
+            Guide for Authors text (required)
             <textarea
               value={guidance.guideSnapshot}
               onChange={(event) => {
@@ -785,8 +758,8 @@ export default function HomePage() {
         </div>
         {manualRequested && !manualReady && (
           <small className="file-limit-notice">
-            Complete all three fields, using official HTTPS pages from the same
-            publisher domain, or clear them to return to automatic lookup.
+            Enter the ISSN and both complete guidance texts (at least 500
+            characters each), or clear them to return to automatic lookup.
           </small>
         )}
       </details>

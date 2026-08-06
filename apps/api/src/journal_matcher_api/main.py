@@ -146,16 +146,17 @@ class WorkflowRequest(BaseModel):
     guide_url: str | None = Field(alias="guideUrl", default=None, pattern=r"^https://")
     scope_snapshot: str | None = Field(alias="scopeSnapshot", default=None, min_length=500, max_length=200_000)
     guide_snapshot: str | None = Field(alias="guideSnapshot", default=None, min_length=500, max_length=200_000)
+    article_type: Literal["regular", "perspective", "review", "letter", "other"] = Field(
+        alias="articleType", default="regular"
+    )
 
     def has_assisted_guidance(self) -> bool:
         urls = (self.scope_url, self.guide_url)
         if any(urls) and not all(urls):
             raise HTTPException(status_code=422, detail="Provide both official guidance URLs or neither")
-        if (self.scope_snapshot or self.guide_snapshot) and not all(urls):
-            raise HTTPException(status_code=422, detail="Guidance text requires its official URLs")
         if bool(self.scope_snapshot) != bool(self.guide_snapshot):
             raise HTTPException(status_code=422, detail="Provide both guidance snapshots or neither")
-        return all(urls)
+        return all(urls) or bool(self.scope_snapshot and self.guide_snapshot)
 
     def has_supplied_identity(self) -> bool:
         values = (self.journal_title, self.journal_issn)
@@ -454,25 +455,32 @@ async def execute_project_workflow(
     supplied_identity = payload.has_supplied_identity()
     resolved: dict[str, object]
     if assisted and supplied_identity:
-        scope_domain = (urlparse(str(payload.scope_url)).hostname or "").casefold()
-        guide_domain = (urlparse(str(payload.guide_url)).hostname or "").casefold()
-        if not scope_domain or scope_domain != guide_domain:
-            raise HTTPException(status_code=422, detail="Scope and author guide must use the same official domain")
-        validate_public_https_url(str(payload.scope_url), scope_domain)
-        validate_public_https_url(str(payload.guide_url), scope_domain)
-        resolved = {
-            "title": str(payload.journal_title),
-            "issn": str(payload.journal_issn).upper(),
-            "officialDomain": scope_domain,
-            "homepageUrl": f"https://{scope_domain}/",
-            "scopeUrl": payload.scope_url,
-            "guideUrl": payload.guide_url,
-            "evidence": {
-                "provider": "user-supplied-official-package",
-                "sourceId": str(payload.scope_url),
-                "confidence": 1.0,
-            },
-        }
+        if not payload.scope_url and not payload.guide_url:
+            resolved = {
+                "title": str(payload.journal_title),
+                "issn": str(payload.journal_issn).upper(),
+                "officialDomain": "user-supplied-guidance",
+                "homepageUrl": "",
+                "scopeUrl": None,
+                "guideUrl": None,
+                "evidence": {"provider": "user-supplied-guidance", "confidence": 1.0},
+            }
+        else:
+            scope_domain = (urlparse(str(payload.scope_url)).hostname or "").casefold()
+            guide_domain = (urlparse(str(payload.guide_url)).hostname or "").casefold()
+            if not scope_domain or scope_domain != guide_domain:
+                raise HTTPException(status_code=422, detail="Scope and author guide must use the same official domain")
+            validate_public_https_url(str(payload.scope_url), scope_domain)
+            validate_public_https_url(str(payload.guide_url), scope_domain)
+            resolved = {
+                "title": str(payload.journal_title),
+                "issn": str(payload.journal_issn).upper(),
+                "officialDomain": scope_domain,
+                "homepageUrl": f"https://{scope_domain}/",
+                "scopeUrl": payload.scope_url,
+                "guideUrl": payload.guide_url,
+                "evidence": {"provider": "user-supplied-official-package", "confidence": 1.0},
+            }
     elif assisted:
         contact = os.getenv("JOURNAL_MATCHER_PROVIDER_EMAIL")
         if not contact:
@@ -547,7 +555,7 @@ async def execute_project_workflow(
     report_progress("manuscript-analysis", 62)
     analysis = await create_analysis(project_id, AnalysisRequest(profileVersionId=str(profile["id"])), principal, store)
     report_progress("ai-review", 78)
-    enriched = await _create_ai_review(str(analysis["id"]), principal, store, report_progress)
+    enriched = await _create_ai_review(str(analysis["id"]), principal, store, report_progress, payload.article_type)
     report_progress("artifact-generation", 90)
     artifact_result = await generate_artifacts(str(analysis["id"]), principal, store)
     report_progress("artifact-generation", 98)
@@ -647,8 +655,12 @@ async def _research_journal(
                 return cached, "cached-official"
             raise
 
-    scope_text, scope_access = acquire_guidance(payload.scope_url, "official-scope", payload.scope_snapshot)
-    guide_text, guide_access = acquire_guidance(payload.guide_url, "official-guide", payload.guide_snapshot)
+    if payload.scope_snapshot and payload.guide_snapshot and not payload.scope_url and not payload.guide_url:
+        scope_text, scope_access = payload.scope_snapshot, "browser-assisted"
+        guide_text, guide_access = payload.guide_snapshot, "browser-assisted"
+    else:
+        scope_text, scope_access = acquire_guidance(payload.scope_url, "official-scope", payload.scope_snapshot)
+        guide_text, guide_access = acquire_guidance(payload.guide_url, "official-guide", payload.guide_snapshot)
     evidence = [
         make_evidence(
             "official-scope",
@@ -1018,6 +1030,7 @@ async def _create_ai_review(
     principal: Principal,
     store: Store,
     progress_callback: Callable[[str, int], None] | None = None,
+    article_type: str = "regular",
 ) -> dict[str, object]:
     repository = analysis_repository(store)
     repository.migrate()
@@ -1038,8 +1051,9 @@ async def _create_ai_review(
     research_key = os.getenv("RESEARCH_STARTER_API_KEY")
     if base_url and research_key and literature_context.topic:
         try:
+            research_topic = f"{article_type} article editorial context: {literature_context.topic}"
             research_result = ResearchStarterClient(base_url, research_key).report(
-                literature_context.topic, max_references=30, max_top_papers=20
+                research_topic, max_references=30, max_top_papers=20
             )
             literature.extend(
                 recent_literature_evidence(
@@ -1088,6 +1102,7 @@ async def _create_ai_review(
     try:
         prompt, allowed_source_ids = build_editorial_prompt(
             journal_title=str(cast(dict[str, object], project["journal"])["title"]),
+            article_type=article_type,
             manuscript_segments=cast(list[dict[str, object]], manuscript["segments"]),
             profile_claims=cast(list[dict[str, object]], profile["claims"]),
             official_rules=cast(list[dict[str, object]], analysis["rules"]),

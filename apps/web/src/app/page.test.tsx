@@ -32,6 +32,9 @@ function completePackage() {
       ],
     },
   });
+  fireEvent.click(
+    screen.getByText('Only if automatic journal lookup fails'),
+  );
 }
 
 describe('HomePage', () => {
@@ -59,10 +62,6 @@ describe('HomePage', () => {
     );
     expect(screen.getByLabelText('Target journal')).toBeRequired();
     expect(screen.getByLabelText('Journal ISSN')).not.toBeRequired();
-    expect(screen.getByLabelText('Official Scope URL')).not.toBeRequired();
-    expect(
-      screen.getByLabelText('Official Guide for Authors URL'),
-    ).not.toBeRequired();
     expect(
       screen.getByText('Only if automatic journal lookup fails'),
     ).toBeInTheDocument();
@@ -426,7 +425,6 @@ describe('HomePage', () => {
 
     expect(screen.getByLabelText('Target journal')).toHaveValue('');
     expect(screen.getByLabelText('Journal ISSN')).toHaveValue('');
-    expect(screen.getByLabelText('Official Scope URL')).toHaveValue('');
     expect(screen.queryByText('referencia-1.pdf')).toBeNull();
     expect(
       screen.getByRole('button', { name: 'Start analysis' }),
@@ -534,13 +532,13 @@ describe('HomePage', () => {
       screen.getByRole('button', { name: 'Start analysis' }),
     ).toBeDisabled();
     expect(screen.getByRole('status')).toHaveTextContent(
-      'Complete all optional recovery fields',
+      'Enter the ISSN and both complete guidance texts',
     );
-    fireEvent.change(screen.getByLabelText('Official Scope URL'), {
-      target: { value: 'https://journals.aps.org/prl/about' },
+    fireEvent.change(screen.getByLabelText(/Scope text/), {
+      target: { value: 'scope '.repeat(100) },
     });
-    fireEvent.change(screen.getByLabelText('Official Guide for Authors URL'), {
-      target: { value: 'https://journals.aps.org/prl/authors' },
+    fireEvent.change(screen.getByLabelText(/Guide for Authors text/), {
+      target: { value: 'guide '.repeat(100) },
     });
     expect(
       screen.getByRole('button', { name: 'Start analysis' }),
@@ -564,11 +562,11 @@ describe('HomePage', () => {
     fireEvent.change(screen.getByLabelText('Journal ISSN'), {
       target: { value: '0031-9007' },
     });
-    fireEvent.change(screen.getByLabelText('Official Scope URL'), {
-      target: { value: 'https://journals.aps.org/prl/about' },
+    fireEvent.change(screen.getByLabelText(/Scope text/), {
+      target: { value: 'scope '.repeat(100) },
     });
-    fireEvent.change(screen.getByLabelText('Official Guide for Authors URL'), {
-      target: { value: 'https://journals.aps.org/prl/authors' },
+    fireEvent.change(screen.getByLabelText(/Guide for Authors text/), {
+      target: { value: 'guide '.repeat(100) },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Start analysis' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6));
@@ -577,8 +575,8 @@ describe('HomePage', () => {
     ).toMatchObject({
       journalTitle: 'Physical Review Letters',
       journalIssn: '0031-9007',
-      scopeUrl: 'https://journals.aps.org/prl/about',
-      guideUrl: 'https://journals.aps.org/prl/authors',
+      scopeSnapshot: expect.any(String),
+      guideSnapshot: expect.any(String),
     });
   });
 
@@ -600,31 +598,32 @@ describe('HomePage', () => {
 
   it('accepts browser-assisted official page text when publishers block access', () => {
     render(<HomePage />);
+    fireEvent.click(
+      screen.getByText('Only if automatic journal lookup fails'),
+    );
     fireEvent.change(screen.getByLabelText('Target journal'), {
       target: { value: 'Physical Review Letters' },
     });
     fireEvent.change(screen.getByLabelText('Journal ISSN'), {
       target: { value: '0031-9007' },
     });
-    fireEvent.change(screen.getByLabelText('Official Scope URL'), {
-      target: { value: 'https://journals.aps.org/prl/about' },
-    });
-    fireEvent.change(screen.getByLabelText('Official Guide for Authors URL'), {
-      target: { value: 'https://journals.aps.org/prl/authors' },
-    });
-    fireEvent.change(screen.getByLabelText(/Scope page text/), {
-      target: { value: 'Official scope text copied from the publisher.' },
+    fireEvent.change(screen.getByLabelText(/Scope text/), {
+      target: {
+        value: 'Official scope text copied from the publisher. '.repeat(12),
+      },
     });
     fireEvent.change(screen.getByLabelText(/Guide for Authors text/), {
       target: {
-        value: 'Official author guide text copied from the publisher.',
+        value: 'Official author guide text copied from the publisher. '.repeat(
+          12,
+        ),
       },
     });
-    expect(screen.getByLabelText(/Scope page text/)).toHaveValue(
-      'Official scope text copied from the publisher.',
+    expect(screen.getByLabelText(/Scope text/)).toHaveValue(
+      'Official scope text copied from the publisher. '.repeat(12),
     );
     expect(screen.getByLabelText(/Guide for Authors text/)).toHaveValue(
-      'Official author guide text copied from the publisher.',
+      'Official author guide text copied from the publisher. '.repeat(12),
     );
   });
 });
