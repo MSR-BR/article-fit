@@ -135,6 +135,8 @@ class JournalGuidanceResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     journal_title: str = Field(alias="journalTitle", min_length=2, max_length=300)
+    issn: str = Field(pattern=r"^\d{4}-\d{3}[\dXx]$")
+    official_domain: str = Field(alias="officialDomain", pattern=r"^[a-z0-9.-]+$")
     scope_text: str = Field(alias="scopeText", min_length=300, max_length=80_000)
     guide_text: str = Field(alias="guideText", min_length=300, max_length=120_000)
     source_urls: list[str] = Field(alias="sourceUrls", max_length=10)
@@ -619,9 +621,11 @@ RESPONSE_SCHEMA: dict[str, object] = {
 GUIDANCE_SCHEMA: dict[str, object] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["journalTitle", "scopeText", "guideText", "sourceUrls", "limitations"],
+    "required": ["journalTitle", "issn", "officialDomain", "scopeText", "guideText", "sourceUrls", "limitations"],
     "properties": {
         "journalTitle": {"type": "string", "maxLength": 300},
+        "issn": {"type": "string", "pattern": r"^\d{4}-\d{3}[\dXx]$"},
+        "officialDomain": {"type": "string", "maxLength": 200},
         "scopeText": {"type": "string", "minLength": 300, "maxLength": 80000},
         "guideText": {"type": "string", "minLength": 300, "maxLength": 120000},
         "sourceUrls": {"type": "array", "maxItems": 10, "items": {"type": "string", "maxLength": 2000}},

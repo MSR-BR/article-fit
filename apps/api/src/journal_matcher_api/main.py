@@ -513,9 +513,30 @@ async def execute_project_workflow(
             "evidence": {"provider": "OpenAlex", "sourceId": identity.source_id, "confidence": identity.confidence},
         }
     else:
-        resolved = await resolve_journal(
-            JournalResolveRequest(candidate=str(project["journalCandidate"])), principal, store
-        )
+        try:
+            resolved = await resolve_journal(
+                JournalResolveRequest(candidate=str(project["journalCandidate"])), principal, store
+            )
+        except HTTPException as resolution_error:
+            # OpenAlex and publisher pages are not guaranteed to be reachable. Resolve the
+            # identity and guidance in one Gemini call instead of failing at 25%.
+            try:
+                fallback = GeminiEditorialClient().retrieve_journal_guidance(
+                    str(project["journalCandidate"])
+                ).response
+            except (GeminiConfigurationError, GeminiProviderError, ValueError) as error:
+                raise resolution_error from error
+            resolved = {
+                "title": fallback.journal_title,
+                "issn": fallback.issn.upper(),
+                "officialDomain": fallback.official_domain,
+                "homepageUrl": f"https://{fallback.official_domain}/",
+                "scopeUrl": None,
+                "guideUrl": None,
+                "scopeSnapshot": fallback.scope_text,
+                "guideSnapshot": fallback.guide_text,
+                "evidence": {"provider": "Gemini-guidance-fallback", "confidence": 0.55},
+            }
     store.confirm_journal(
         principal,
         project_id,
@@ -534,8 +555,8 @@ async def execute_project_workflow(
             scopeUrl=resolved.get("scopeUrl"),
             guideUrl=resolved.get("guideUrl"),
             expectedProfileVersion=current_profile_version,
-            scopeSnapshot=payload.scope_snapshot,
-            guideSnapshot=payload.guide_snapshot,
+            scopeSnapshot=payload.scope_snapshot or cast(str | None, resolved.get("scopeSnapshot")),
+            guideSnapshot=payload.guide_snapshot or cast(str | None, resolved.get("guideSnapshot")),
             assistedCaptureConfirmed=assisted,
         ),
         principal,
