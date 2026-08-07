@@ -125,7 +125,6 @@ function requestError(status: number) {
 }
 
 const artifactLabels: Record<string, string> = {
-  'revision-report.pdf': 'Submission-fit report (PDF)',
   'revised-manuscript.pdf': 'Template-faithful manuscript review (PDF)',
 };
 
@@ -404,7 +403,10 @@ export default function HomePage() {
       setArtifacts(
         workflow.artifacts
           .map((item) => item.kind)
-          .filter((kind) => kind !== 'revised-manuscript.docx'),
+          .filter(
+            (kind) =>
+              kind !== 'revised-manuscript.docx' && kind !== 'revision-report.pdf',
+          ),
       );
       setOverallProgress(100);
       setActiveStep(progressStages.length - 1);

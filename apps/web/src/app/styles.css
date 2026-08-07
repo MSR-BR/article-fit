@@ -1082,6 +1082,16 @@ h1 {
   background: #f3a47d;
   color: #173b48;
 }
+.result-download:hover,
+.result-download:focus-visible {
+  background: #2d6578;
+  color: #fff4e5;
+  text-decoration: none;
+}
+.result-download:hover .result-download-title,
+.result-download:focus-visible .result-download-title {
+  color: #fff4e5;
+}
 .artifact-feedback {
   border-color: rgb(255 232 203 / 22%);
 }
