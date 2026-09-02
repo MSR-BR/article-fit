@@ -1,4 +1,4 @@
-FROM node:20.20.2-alpine AS dependencies
+FROM node:24.18.0-alpine AS dependencies
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/web/package.json apps/web/package.json
@@ -17,7 +17,7 @@ COPY apps/web apps/web
 COPY packages/contracts packages/contracts
 RUN npm run build --workspace @journal-matcher/web
 
-FROM node:20.20.2-alpine AS runtime
+FROM node:24.18.0-alpine AS runtime
 ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0
 WORKDIR /app

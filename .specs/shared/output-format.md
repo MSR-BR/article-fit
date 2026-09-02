@@ -7,9 +7,10 @@ Each completed job produces:
 1. `revised-manuscript.docx` — editable proposed revision with visible color-coded changes and comments/annotations.
 2. `revised-manuscript.pdf` — stable review rendering of the same proposed revision.
 3. `revision-report.pdf` — complete recommendation ledger and compliance report.
-4. `provenance-manifest.json` — machine-readable sources, versions, hashes, model/template identifiers, and validation results.
 
-The original input remains downloadable unchanged while retained. If the input is PDF-only and faithful editable reconstruction is not possible, the system must warn the user and label the DOCX as reconstructed.
+Source provenance, model identifiers, content hashes, and validation metadata remain internal. They are not exposed as an end-user download.
+
+For a PDF input, the revised PDF retains every original page unchanged and interleaves color-coded suggestion pages. If faithful editable reconstruction is not possible, the system must warn the user and label the DOCX as reconstructed. For a DOCX input, the original package and visual system control the revised Word document.
 
 ## Change categories and colors
 
@@ -41,19 +42,22 @@ Every change has:
 
 ## Revision report sections
 
-1. Executive summary and prominent “no acceptance guarantee” notice.
-2. Input completeness, journal identity, analyzed article set, and source limitations.
-3. Official scope fit and author-guide compliance matrix.
-4. High-priority scientific and methodological issues.
-5. Article architecture and section-by-section analysis.
-6. Language, presentation, figures/tables, references, declarations, and layout.
-7. Full change ledger ordered by severity and manuscript location.
-8. Unresolved questions and required author actions.
-9. Sources, retrieval dates, journal-profile version, confidence, and reproducibility summary.
+1. Executive verdict and prominent “no acceptance guarantee” notice.
+2. Evidence boundary, analyzed article set, and source limitations.
+3. Official journal Scope and audience fit.
+4. Manuscript-bibliography coverage, recent literature, novelty, safe claims, and claims to avoid.
+5. Direct comparison with the editorial execution observed in the target journal.
+6. High-priority scientific, methodological, validation, and structural upgrades.
+7. Recommended manuscript architecture and section-by-section analysis.
+8. Title options, proposed abstract/significance framing, and figure plan.
+9. Official Guide for Authors compliance.
+10. Staged action plan ordered by priority.
+11. Full change ledger ordered by severity and manuscript location.
+12. Human-readable sources, unresolved questions, and final recommendation.
 
 ## Integrity requirements
 
-- DOCX and PDF convey the same accepted proposal set.
+- DOCX and PDF convey the same visible proposal set, including pending suggestions and excluding rejected items.
 - Headings, tables, figures, equations, citations, cross-references, footnotes, and supplementary references are preserved or explicitly flagged.
 - Page/paragraph locators in the report resolve to the output and, where possible, the original.
 - No internal prompts, credentials, private storage URLs, or other users’ content appear in artifacts.

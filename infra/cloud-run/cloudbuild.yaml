@@ -1,0 +1,26 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --file
+      - apps/api/Dockerfile
+      - --target
+      - runtime
+      - --tag
+      - us-east1-docker.pkg.dev/$PROJECT_ID/article-fit/api:${_TAG}
+      - .
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --file
+      - apps/worker/Dockerfile
+      - --tag
+      - us-east1-docker.pkg.dev/$PROJECT_ID/article-fit/worker:${_TAG}
+      - .
+images:
+  - us-east1-docker.pkg.dev/$PROJECT_ID/article-fit/api:${_TAG}
+  - us-east1-docker.pkg.dev/$PROJECT_ID/article-fit/worker:${_TAG}
+options:
+  logging: CLOUD_LOGGING_ONLY
+substitutions:
+  _TAG: manual

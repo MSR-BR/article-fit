@@ -53,7 +53,7 @@ def complete_evidence() -> list:
                 "article",
                 None if index < 3 else f"https://repository.example/{index}",
                 f"Article {index}",
-                prose,
+                f"{prose} {'private' if index < 3 else 'public'} sample {index}",
                 identifier=f"10.1000/{index}" if index >= 3 else None,
                 locator="full text",
                 access_status="private-derived" if index < 3 else "open",
@@ -109,14 +109,43 @@ def test_profile_is_versioned_immutable_private_text_free_and_concurrency_safe(t
     assert limitations == []
     first = repository.publish("1234-567X", evidence, claims, limitations, expected_version=0)
     assert first["version"] == 1
+    assert repository.current_version("1234-567X") == 1
     serialized = json.dumps(first)
     assert "evidence evidence" not in serialized
     assert "private-source" not in serialized
+    private_evidence = [item for item in evidence if item.access_status == "private-derived"]
+    assert all(item.title not in serialized for item in private_evidence)
+    assert all(item.source_id not in serialized for item in private_evidence)
+    assert all(item.content_hash not in serialized for item in private_evidence)
+    aggregate = next(item for item in first["evidence"] if item["source_id"] == "ephemeral-user-sample")
+    assert aggregate["sample_count"] == 3
     with pytest.raises(HTTPException, match="concurrently updated"):
         repository.publish("1234-567X", evidence, claims, limitations, expected_version=0)
     second = repository.publish("1234-567X", evidence, claims, limitations, expected_version=1)
     assert second["supersedesId"] == first["id"]
+    assert repository.current_version("1234-567X") == 2
+    aggregate = next(item for item in second["evidence"] if item["source_id"] == "ephemeral-user-sample")
+    assert aggregate["sample_count"] == 6
     assert repository.get(first["id"])["version"] == 1
+    assert len(repository.official_snapshots(str(second["id"]))) == 2
+    repository.delete_snapshots(str(second["id"]))
+    assert repository.official_snapshots(str(second["id"])) == []
+    historical = repository.latest_official_snapshots("1234-567X")
+    assert {item["source_type"] for item in historical} == {"official-scope", "official-guide"}
+
+    feedback = make_evidence("user-feedback", None, "Feedback", "use clearer figures", locator="artifact:report")
+    feedback_claim = {
+        "key": "feedback:figures",
+        "claimClass": "feedback-informed advisory",
+        "summary": "Use clearer figures",
+        "sourceIds": [feedback.source_id],
+        "locator": "artifact:report",
+    }
+    third = repository.publish("1234-567X", [feedback], [feedback_claim], [], expected_version=2)
+    assert {item["source_type"] for item in repository.official_snapshots(str(third["id"]))} == {
+        "official-scope",
+        "official-guide",
+    }
 
 
 def test_degraded_profile_cannot_be_published(tmp_path: Path) -> None:

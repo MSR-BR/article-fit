@@ -1,12 +1,12 @@
-# Journal Matcher
+# Article Fit
 
-Journal Matcher is an evidence-first AI-assisted manuscript preparation project. Changes 001–003 provide runnable web, API, and worker foundations, an invitation-only local ingestion pilot, and evidence-backed journal research/profile creation. The research stage discovers three recent works by confirmed ISSN, seeks lawful open versions, snapshots official scope/author guidance, and publishes only complete, provenance-validated journal profiles.
+Article Fit is an evidence-first AI-assisted manuscript preparation pilot. The hosted workflow accepts a target journal, three reference articles, and one manuscript; researches recent literature and official journal guidance; learns a versioned editorial profile; produces evidence-linked recommendations; and exports a revision report plus revised DOCX/PDF artifacts.
 
-Manuscript comparison, rewriting, and final export are deliberately not implemented yet.
+The production pilot uses Vercel for the minimal web interface, Cloud Run for the Python API and durable worker, and one secured Supabase project for named authentication, private storage, metadata, and the job queue. It remains invitation-only and makes no guarantee of journal acceptance.
 
 ## Prerequisites
 
-- Node.js 20.20.2 and npm 10.x
+- Node.js 24.18.0 LTS and npm 10 or 11
 - Python 3.13.14 (or Docker for the Python services)
 - Docker with Compose for PostgreSQL, Redis, and MinIO
 
@@ -38,7 +38,7 @@ npm run dev:worker
 - API health: `http://localhost:8000/health`
 - Worker check: `npm run health:worker`
 
-The local pilot defaults to bearer token `local-invite-token`, generates a workspace UUID in the web interface, and stores metadata plus private objects below `/tmp/journal-matcher`. Configure the `JOURNAL_MATCHER_*` values from `.env.example` before any shared or deployed use. Replace the example provider email with a monitored operational address; Crossref, OpenAlex, and Unpaywall require identifiable, rate-limited use. SQLite, local filesystem storage, synchronous research orchestration, bounded extraction, and the EICAR-only malware adapter are development providers; they are not the production security architecture.
+The local API test path defaults to bearer token `local-invite-token` and uses temporary private objects below `/tmp/journal-matcher`. The hosted MVP has no end-user login: its Vercel proxy sends a server-only internal credential to the private Python API and never exposes the Supabase service-role key to the browser. Uploaded sources and extracted text are deleted at terminal processing; generated downloads and orphaned projects expire within 24 hours. Only derived, privacy-safe journal memory persists. Configure the values documented in `.env.example` before running either mode. Replace the example provider email with a monitored operational address; Crossref, OpenAlex, and Unpaywall require identifiable, rate-limited use.
 
 ## Quality commands
 

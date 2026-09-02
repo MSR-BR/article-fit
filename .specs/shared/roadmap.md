@@ -2,7 +2,7 @@
 
 ## MVP outcome
 
-A controlled pilot user can upload a manuscript and three references, confirm a journal, receive evidence-backed journal research, review categorized revision proposals, and download validated DOCX/PDF outputs. Shared journal profiles improve through versioned derived evidence without exposing private manuscripts.
+An MVP visitor can upload a manuscript and three references without login, confirm a journal, receive evidence-backed journal research, review categorized revision proposals, and download validated DOCX/PDF outputs for up to 24 hours. Uploaded sources are deleted after processing; shared journal profiles improve through versioned derived conclusions without retaining private manuscript material.
 
 ## Phase sequence
 
@@ -23,7 +23,7 @@ A controlled pilot user can upload a manuscript and three references, confirm a 
 - M3 — evidence acquisition and first versioned journal profile.
 - M4 — manuscript analysis and reviewable recommendation ledger.
 - M5 — document exports and expert-reviewed evaluation set.
-- M6 — invitation-only pilot with monitoring and manual incident path.
+- M6 — open MVP with server-side abuse controls, monitoring, and a manual incident path.
 
 ## Future backlog (not MVP)
 

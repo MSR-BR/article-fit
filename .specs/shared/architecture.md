@@ -2,13 +2,13 @@
 
 ## Product boundary
 
-Journal Matcher accepts a manuscript (`.docx` or text-extractable PDF), three user-supplied journal articles (PDF), and a confirmed target journal. It gathers traceable journal evidence, builds or improves a shared journal profile, analyzes the private manuscript, and exports a revised DOCX/PDF plus an evidence-backed revision report.
+Article Fit accepts a manuscript (`.docx` or text-extractable PDF), three user-supplied journal articles (PDF), and a confirmed target journal. It gathers traceable journal evidence, builds or improves a shared journal profile, analyzes the private manuscript, and exports a revised DOCX/PDF plus an evidence-backed revision report.
 
 ## Architectural principles
 
 - Evidence before generation: no recommendation enters an output without a traceable basis or an explicit expert-judgment label.
-- Private manuscripts and shared journal knowledge are separate security domains.
-- Immutable source snapshots feed versioned, reviewable derived profiles.
+- Private manuscripts are ephemeral inputs; shared journal knowledge contains derived conclusions only.
+- Temporary source snapshots feed versioned, reviewable profiles and are deleted after rule extraction.
 - Deterministic checks handle format constraints; language models handle bounded interpretation and drafting.
 - Every long-running stage is resumable, idempotent, observable, and independently testable.
 - Provider interfaces prevent lock-in to a single search, extraction, storage, or model vendor.
@@ -48,7 +48,7 @@ flowchart LR
 
 ## Processing flow
 
-1. Validate files, malware-scan, hash, store privately, and create a job.
+1. Validate files, malware-scan, hash, store temporarily in a private bucket, and create a job.
 2. Extract layout-aware text and section structure; retain page/paragraph anchors.
 3. Resolve and confirm journal identity (canonical title, ISSN, publisher, official domain).
 4. Search for up to three eligible articles published within the rolling five-year window. Prefer official open full text; otherwise resolve lawful repositories or author manuscripts, including strongly matched arXiv versions.
@@ -56,13 +56,14 @@ flowchart LR
 6. Analyze at least the three private user uploads and enrich the sample with up to three discovered sources. Produce bounded structural/style features and evidence links, reporting the actual sample size.
 7. Load the current versioned journal profile; propose a new candidate profile; validate provenance and confidence; then publish it atomically.
 8. Compare the private manuscript against journal requirements and the profile. Separate deterministic violations from model-based recommendations.
-9. Generate proposed revisions, a change ledger, and DOCX/PDF outputs. Run integrity checks and require the user to review material scientific edits.
+9. Generate a structured editorial assessment and color-coded DOCX/PDF review copies. Preserve a DOCX source package in place; preserve PDF source pages unchanged and interleave anchored suggestion pages. Run structural and visual integrity checks and require the user to review material scientific edits.
+10. Hard-delete uploaded objects and extracted private text at terminal success, cancellation, or final failure. Keep generated downloads for at most 24 hours, then hard-delete the private project and its artifacts.
 
 ## Data model
 
 Core entities:
 
-- `users`, `workspaces`, `memberships`
+- one fixed MVP workspace behind the server proxy; no end-user identity or login in the MVP
 - `journals` (canonical identity, ISSNs, official domain)
 - `journal_sources` (URL/DOI, source type, dates, hashes, license/access status)
 - `journal_profile_versions` (derived rules, evidence map, confidence, supersession)
@@ -75,7 +76,7 @@ Core entities:
 - `artifacts` (DOCX, PDF, report, validation state)
 - `audit_events` (actor, action, time, non-secret metadata)
 
-Raw private document text must not be stored in shared profile tables. Embeddings derived from private manuscripts, if introduced later, stay workspace-scoped and follow the same retention rules as the source.
+Raw private document text, filenames, hashes, private evidence identifiers, manuscript recommendations, and generated outputs must not be stored in shared profile tables. The durable profile keeps only derived journal conclusions, official rules, public provenance, aggregate sample counts, confidence, timestamps, and a revision number. The single current profile head is keyed by confirmed journal identity, normally ISSN; a superseded revision survives only while a temporary output references it and is then pruned.
 
 ## Journal profile schema (conceptual)
 
@@ -92,12 +93,12 @@ Profiles describe observed tendencies; they must not present a six-article sampl
 
 ## Security and privacy
 
-- Tenant isolation is enforced in application code and database policies.
+- The public MVP has no user login. Vercel authenticates to the private API with a server-only credential and a fixed workspace; direct browser-to-Supabase/API access remains denied.
 - Encryption in transit and at rest; secrets reside in a managed secret store.
 - Signed, short-lived artifact URLs; no public upload bucket.
 - File-type verification, malware scanning, size/page limits, parser sandboxing, and prompt-injection defenses for document/web content.
 - Model requests exclude unnecessary personal data and use approved retention settings.
-- User deletion removes private originals, derivatives, and embeddings according to the retention policy; shared facts remain only if independently sourced and non-identifying.
+- Terminal processing deletes source originals and extracted text immediately. A scheduled safety purge hard-deletes any project, generated artifact, or orphaned upload by 24 hours.
 - Audit access to manuscripts and profile publication.
 
 ## Reliability and observability

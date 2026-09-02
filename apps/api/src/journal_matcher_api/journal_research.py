@@ -292,6 +292,62 @@ def _editorial_metrics(text: str) -> dict[str, float]:
     }
 
 
+def durable_profile_payload(
+    evidence: list[Evidence], claims: list[dict[str, object]]
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Remove private-document fingerprints while retaining aggregate support."""
+    private_ids = {item.source_id for item in evidence if item.access_status == "private-derived"}
+    safe_evidence: list[dict[str, object]] = [
+        {key: value for key, value in asdict(item).items() if key != "content"}
+        for item in evidence
+        if item.source_id not in private_ids
+    ]
+    if private_ids:
+        safe_evidence.append(
+            {
+                "source_id": "ephemeral-user-sample",
+                "source_type": "ephemeral-user-sample",
+                "access_status": "derived-only",
+                "sample_count": len(private_ids),
+            }
+        )
+    safe_claims = json.loads(json.dumps(claims))
+    for claim in safe_claims:
+        source_ids = claim.get("sourceIds", [])
+        if not isinstance(source_ids, list):
+            continue
+        used_private = any(source_id in private_ids for source_id in source_ids)
+        claim["sourceIds"] = [source_id for source_id in source_ids if source_id not in private_ids]
+        if used_private:
+            claim["sourceIds"].append("ephemeral-user-sample")
+            claim["ephemeralSampleCount"] = len(private_ids)
+    return safe_evidence, safe_claims
+
+
+def merge_profile_memory(
+    previous_evidence: list[dict[str, object]],
+    previous_claims: list[dict[str, object]],
+    current_evidence: list[dict[str, object]],
+    current_claims: list[dict[str, object]],
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Keep one current conclusion per stable key and cumulative public provenance."""
+    evidence_by_id = {str(item.get("source_id")): item for item in previous_evidence}
+    for item in current_evidence:
+        source_id = str(item.get("source_id"))
+        if source_id == "ephemeral-user-sample" and source_id in evidence_by_id:
+            old_value = evidence_by_id[source_id].get("sample_count", 0)
+            current_value = item.get("sample_count", 0)
+            old_count = old_value if isinstance(old_value, int) and not isinstance(old_value, bool) else 0
+            current_count = (
+                current_value if isinstance(current_value, int) and not isinstance(current_value, bool) else 0
+            )
+            item = {**item, "sample_count": old_count + current_count}
+        evidence_by_id[source_id] = item
+    claims_by_key = {str(item.get("key")): item for item in previous_claims}
+    claims_by_key.update({str(item.get("key")): item for item in current_claims})
+    return list(evidence_by_id.values()), list(claims_by_key.values())
+
+
 class JournalProfileRepository:
     """Immutable, optimistic-concurrency journal profile storage."""
 
@@ -332,7 +388,7 @@ class JournalProfileRepository:
         evidence_by_id = {item.source_id: item for item in evidence}
         for claim in claims:
             validate_claim(claim, evidence_by_id)
-        shared_evidence = [{key: value for key, value in asdict(item).items() if key != "content"} for item in evidence]
+        shared_evidence, durable_claims = durable_profile_payload(evidence, claims)
         with closing(sqlite3.connect(self.database_path)) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
             head = connection.execute(
@@ -341,9 +397,20 @@ class JournalProfileRepository:
             current = int(head[1]) if head else 0
             if current != expected_version:
                 raise HTTPException(status_code=409, detail="Journal profile was concurrently updated")
+            if head:
+                previous = connection.execute(
+                    "SELECT claims_json, evidence_json FROM journal_profile_versions WHERE id = ?", (head[0],)
+                ).fetchone()
+                if previous:
+                    shared_evidence, durable_claims = merge_profile_memory(
+                        json.loads(previous[1]),
+                        json.loads(previous[0]),
+                        shared_evidence,
+                        durable_claims,
+                    )
             version = current + 1
             version_id = hashlib.sha256(
-                json.dumps([journal_issn, version, shared_evidence, claims], sort_keys=True).encode()
+                json.dumps([journal_issn, version, shared_evidence, durable_claims], sort_keys=True).encode()
             ).hexdigest()[:32]
             connection.execute(
                 "INSERT INTO journal_profile_versions VALUES (?, ?, ?, 'published', ?, ?, ?, ?, ?)",
@@ -351,7 +418,7 @@ class JournalProfileRepository:
                     version_id,
                     journal_issn,
                     version,
-                    json.dumps(claims, sort_keys=True),
+                    json.dumps(durable_claims, sort_keys=True),
                     json.dumps(shared_evidence, sort_keys=True),
                     "[]",
                     datetime.now(UTC).isoformat(),
@@ -363,15 +430,49 @@ class JournalProfileRepository:
                    ON CONFLICT(journal_issn) DO UPDATE SET version_id=excluded.version_id, version=excluded.version""",
                 (journal_issn, version_id, version),
             )
+            snapshot_by_type: dict[str, tuple[str, str, str]] = {}
+            if head and {item.source_type for item in evidence if item.source_type in OFFICIAL_TYPES} != OFFICIAL_TYPES:
+                rows = connection.execute(
+                    """SELECT snapshots.source_id, snapshots.source_type, snapshots.content,
+                              snapshots.content_hash
+                       FROM journal_source_snapshots AS snapshots
+                       JOIN journal_profile_versions AS versions
+                         ON versions.id = snapshots.profile_version_id
+                       WHERE versions.journal_issn = ?
+                       ORDER BY versions.version DESC""",
+                    (journal_issn,),
+                ).fetchall()
+                for source_id, source_type, content, content_hash in rows:
+                    snapshot_by_type.setdefault(str(source_type), (str(source_id), str(content), str(content_hash)))
+            for item in evidence:
+                if item.source_type in OFFICIAL_TYPES:
+                    snapshot_by_type[item.source_type] = (item.source_id, item.content, item.content_hash)
             connection.executemany(
                 "INSERT INTO journal_source_snapshots VALUES (?, ?, ?, ?, ?)",
                 [
-                    (version_id, item.source_id, item.source_type, item.content, item.content_hash)
-                    for item in evidence
-                    if item.source_type in OFFICIAL_TYPES
+                    (version_id, source_id, source_type, content, content_hash)
+                    for source_type, (source_id, content, content_hash) in snapshot_by_type.items()
                 ],
             )
         return self.get(version_id)
+
+    def current_version(self, journal_issn: str) -> int:
+        with closing(sqlite3.connect(self.database_path)) as connection:
+            row = connection.execute(
+                "SELECT version FROM journal_profile_heads WHERE journal_issn = ?", (journal_issn,)
+            ).fetchone()
+        return int(row[0]) if row else 0
+
+    def current(self, journal_issn: str) -> dict[str, object] | None:
+        with closing(sqlite3.connect(self.database_path)) as connection:
+            row = connection.execute(
+                "SELECT version_id FROM journal_profile_heads WHERE journal_issn = ?", (journal_issn,)
+            ).fetchone()
+        return self.get(str(row[0])) if row else None
+
+    def delete_snapshots(self, version_id: str) -> None:
+        with closing(sqlite3.connect(self.database_path)) as connection, connection:
+            connection.execute("DELETE FROM journal_source_snapshots WHERE profile_version_id = ?", (version_id,))
 
     def official_snapshots(self, version_id: str) -> list[dict[str, str]]:
         self.get(version_id)
@@ -384,19 +485,45 @@ class JournalProfileRepository:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def latest_official_snapshots(self, journal_issn: str) -> list[dict[str, str]]:
+        """Return the newest retained snapshot for each official source type."""
+        with closing(sqlite3.connect(self.database_path)) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                """SELECT snapshots.source_id, snapshots.source_type, snapshots.content,
+                          snapshots.content_hash
+                   FROM journal_source_snapshots AS snapshots
+                   JOIN journal_profile_versions AS versions
+                     ON versions.id = snapshots.profile_version_id
+                   WHERE versions.journal_issn = ?
+                   ORDER BY versions.version DESC""",
+                (journal_issn,),
+            ).fetchall()
+        newest: dict[str, dict[str, str]] = {}
+        for row in rows:
+            item = dict(row)
+            newest.setdefault(str(item["source_type"]), item)
+        return [newest[source_type] for source_type in sorted(newest)]
+
     def get(self, version_id: str) -> dict[str, object]:
         with closing(sqlite3.connect(self.database_path)) as connection:
             connection.row_factory = sqlite3.Row
             row = connection.execute("SELECT * FROM journal_profile_versions WHERE id = ?", (version_id,)).fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail="Journal profile version not found")
+        evidence = json.loads(row["evidence_json"])
+        feedback_count = sum(
+            1 for item in evidence if isinstance(item, dict) and item.get("source_type") == "user-feedback"
+        )
         return {
             "id": row["id"],
             "journalIssn": row["journal_issn"],
             "version": row["version"],
+            "optimizationCount": row["version"],
+            "feedbackCount": feedback_count,
             "status": row["status"],
             "claims": json.loads(row["claims_json"]),
-            "evidence": json.loads(row["evidence_json"]),
+            "evidence": evidence,
             "limitations": json.loads(row["limitations_json"]),
             "createdAt": row["created_at"],
             "supersedesId": row["supersedes_id"],
@@ -421,7 +548,7 @@ class PoliteHttpClient:
         request = Request(
             url,
             headers={
-                "User-Agent": f"JournalMatcher/0.1 (mailto:{self.contact_email})",
+                "User-Agent": f"ArticleFit/0.1 (mailto:{self.contact_email})",
                 "Accept": "application/json,text/html,application/pdf",
             },
         )

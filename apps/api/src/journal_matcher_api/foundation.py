@@ -34,7 +34,7 @@ MAX_FILE_BYTES = 25 * 1024 * 1024
 MAX_PDF_PAGES = 200
 MAX_DOCX_ENTRIES = 2_000
 MAX_DOCX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
-RETENTION_DAYS = 30
+EPHEMERAL_RETENTION_HOURS = 24
 
 
 def utc_now() -> str:
@@ -114,6 +114,7 @@ class FoundationStore:
                     stage TEXT NOT NULL,
                     progress INTEGER NOT NULL,
                     error_code TEXT,
+                    error_detail TEXT,
                     retry_eligible INTEGER NOT NULL DEFAULT 0,
                     cancel_requested INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
@@ -132,6 +133,9 @@ class FoundationStore:
                 );
                 """
             )
+            columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(jobs)")}
+            if "error_detail" not in columns:
+                connection.execute("ALTER TABLE jobs ADD COLUMN error_detail TEXT")
 
     def audit(
         self,
@@ -301,7 +305,10 @@ class FoundationStore:
             job_id = new_id()
             now = utc_now()
             connection.execute(
-                "INSERT INTO jobs VALUES (?, ?, ?, ?, 'succeeded', 'ingestion-complete', 100, NULL, 0, 0, ?, ?)",
+                """INSERT INTO jobs
+                   (id, project_id, workspace_id, idempotency_key, state, stage, progress,
+                    error_code, error_detail, retry_eligible, cancel_requested, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, 'succeeded', 'ingestion-complete', 100, NULL, NULL, 0, 0, ?, ?)""",
                 (job_id, project_id, principal.workspace_id, idempotency_key, now, now),
             )
             row = connection.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
@@ -331,7 +338,9 @@ class FoundationStore:
                 (utc_now(), job_id, principal.workspace_id),
             )
         self.audit(principal, "job.cancelled", "job", job_id)
-        return self.get_job(principal, job_id)
+        cancelled = self.get_job(principal, job_id)
+        self.delete_source_documents(principal, str(job["projectId"]))
+        return cancelled
 
     def delete_project(self, principal: Principal, project_id: str) -> None:
         self._project_row(principal, project_id)
@@ -344,13 +353,12 @@ class FoundationStore:
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'analysis_runs'"
             ).fetchone()
             if analysis_tables_exist:
-                analysis_ids = [
-                    row["id"]
-                    for row in connection.execute(
-                        "SELECT id FROM analysis_runs WHERE project_id = ? AND workspace_id = ?",
-                        (project_id, principal.workspace_id),
-                    ).fetchall()
-                ]
+                analysis_rows = connection.execute(
+                    "SELECT id, profile_version_id FROM analysis_runs WHERE project_id = ? AND workspace_id = ?",
+                    (project_id, principal.workspace_id),
+                ).fetchall()
+                analysis_ids = [row["id"] for row in analysis_rows]
+                profile_version_ids = {row["profile_version_id"] for row in analysis_rows}
                 for analysis_id in analysis_ids:
                     objects.extend(
                         connection.execute(
@@ -370,21 +378,57 @@ class FoundationStore:
                     connection.execute("DELETE FROM recommendations WHERE analysis_id = ?", (analysis_id,))
                     connection.execute("DELETE FROM guide_rules WHERE analysis_id = ?", (analysis_id,))
                     connection.execute("DELETE FROM analysis_runs WHERE id = ?", (analysis_id,))
-            deleted_at = utc_now()
+                for profile_version_id in profile_version_ids:
+                    connection.execute(
+                        "DELETE FROM journal_source_snapshots WHERE profile_version_id = ?", (profile_version_id,)
+                    )
+                    is_head = connection.execute(
+                        "SELECT 1 FROM journal_profile_heads WHERE version_id = ?", (profile_version_id,)
+                    ).fetchone()
+                    is_referenced = connection.execute(
+                        "SELECT 1 FROM analysis_runs WHERE profile_version_id = ?", (profile_version_id,)
+                    ).fetchone()
+                    if not is_head and not is_referenced:
+                        connection.execute(
+                            "UPDATE journal_profile_versions SET supersedes_id = NULL WHERE supersedes_id = ?",
+                            (profile_version_id,),
+                        )
+                        connection.execute("DELETE FROM journal_profile_versions WHERE id = ?", (profile_version_id,))
             connection.execute(
-                "UPDATE documents SET deleted_at = ? WHERE project_id = ? AND workspace_id = ?",
-                (deleted_at, project_id, principal.workspace_id),
+                "DELETE FROM documents WHERE project_id = ? AND workspace_id = ?",
+                (project_id, principal.workspace_id),
             )
             connection.execute(
-                "UPDATE projects SET deleted_at = ? WHERE id = ? AND workspace_id = ?",
-                (deleted_at, project_id, principal.workspace_id),
+                "DELETE FROM jobs WHERE project_id = ? AND workspace_id = ?",
+                (project_id, principal.workspace_id),
+            )
+            connection.execute(
+                "DELETE FROM projects WHERE id = ? AND workspace_id = ?",
+                (project_id, principal.workspace_id),
             )
         for item in objects:
             (self.object_root / item["object_key"]).unlink(missing_ok=True)
         self.audit(principal, "project.deleted", "project", project_id)
 
+    def delete_source_documents(self, principal: Principal, project_id: str) -> int:
+        """Remove submitted bytes and extracted private text after terminal processing."""
+        self._project_row(principal, project_id)
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT object_key FROM documents WHERE project_id = ? AND workspace_id = ?",
+                (project_id, principal.workspace_id),
+            ).fetchall()
+            connection.execute(
+                "DELETE FROM documents WHERE project_id = ? AND workspace_id = ?",
+                (project_id, principal.workspace_id),
+            )
+        for row in rows:
+            (self.object_root / row["object_key"]).unlink(missing_ok=True)
+        self.audit(principal, "documents.ephemeral-deleted", "project", project_id, {"count": str(len(rows))})
+        return len(rows)
+
     def purge_expired(self) -> int:
-        cutoff = (datetime.now(UTC) - timedelta(days=RETENTION_DAYS)).isoformat()
+        cutoff = (datetime.now(UTC) - timedelta(hours=EPHEMERAL_RETENTION_HOURS)).isoformat()
         with self.connect() as connection:
             rows = connection.execute(
                 "SELECT id, workspace_id, owner_id FROM projects WHERE created_at < ? AND deleted_at IS NULL",
@@ -548,6 +592,7 @@ def job_payload(row: sqlite3.Row) -> dict[str, object]:
         "stage": row["stage"],
         "progress": row["progress"],
         "errorCode": row["error_code"],
+        "errorDetail": row["error_detail"],
         "retryEligible": bool(row["retry_eligible"]),
         "updatedAt": row["updated_at"],
     }

@@ -32,6 +32,7 @@ export const ingestionJobSchema = z.object({
   stage: z.string().min(1),
   progress: z.number().int().min(0).max(100),
   errorCode: z.string().nullable(),
+  errorDetail: z.string().max(500).nullable(),
   retryEligible: z.boolean(),
   updatedAt: z.iso.datetime({ offset: true }),
 });
@@ -153,12 +154,7 @@ export const analysisResultSchema = z.object({
 
 export const artifactSchema = z.object({
   artifactId: opaqueIdSchema,
-  kind: z.enum([
-    'revised-docx',
-    'revised-pdf',
-    'revision-report',
-    'provenance-manifest',
-  ]),
+  kind: z.enum(['revised-docx', 'revised-pdf', 'revision-report']),
   state: z.enum(['pending', 'valid', 'invalid']),
   contentHash: z
     .string()

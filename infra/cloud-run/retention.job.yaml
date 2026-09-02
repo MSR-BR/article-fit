@@ -1,0 +1,26 @@
+apiVersion: run.googleapis.com/v1
+kind: Job
+metadata:
+  name: article-fit-retention
+  labels:
+    app.kubernetes.io/name: article-fit
+    app.kubernetes.io/component: retention
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      taskCount: 1
+      template:
+        spec:
+          maxRetries: 1
+          timeoutSeconds: '900'
+          serviceAccountName: article-fit-worker@article-fit-uff.iam.gserviceaccount.com
+          containers:
+            - image: us-east1-docker.pkg.dev/article-fit-uff/article-fit/worker:IMAGE_TAG
+              args: ['--purge-expired']
+              resources:
+                limits:
+                  cpu: '1'
+                  memory: 512Mi

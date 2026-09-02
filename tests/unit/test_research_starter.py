@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from urllib.error import HTTPError
 
 import pytest
@@ -74,3 +75,16 @@ def test_research_starter_validates_base_topic_and_limits() -> None:
         client.report("")
     with pytest.raises(HTTPException, match="outside"):
         client.report("topic", max_references=81)
+
+
+def test_article_fit_prefers_dedicated_research_starter_key() -> None:
+    main_source = (
+        Path(__file__).resolve().parents[2]
+        / "apps"
+        / "api"
+        / "src"
+        / "journal_matcher_api"
+        / "main.py"
+    ).read_text()
+    assert 'os.getenv("RESEARCH_STARTER_ARTICLE_FIT_API_KEY")' in main_source
+    assert 'or os.getenv("RESEARCH_STARTER_API_KEY")' in main_source

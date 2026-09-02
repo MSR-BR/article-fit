@@ -1,6 +1,6 @@
 # Change 006 — Export and Deployment
 
-Status: `in progress - C6.1 minimal local interface`
+Status: `hosted pilot active — owner workflow and release sign-off pending`
 
 ## Objective
 
@@ -9,8 +9,9 @@ Deploy the validated MVP as a secure invitation-only pilot with monitored export
 ## Requirements
 
 - Keep the pilot interface intentionally minimal: one multi-file input for three or more orientation articles and one input for the manuscript.
-- Infer the target journal from the orientation articles; do not ask the user to type or confirm journal metadata in the primary flow.
+- Require the user to inform the target journal by title, ISSN, or official URL. Orientation articles may be repository versions such as arXiv and must never be treated as sufficient journal-identification evidence.
 - Enable an explicit `Iniciar análise` action only after a valid upload package is present.
+- During execution, show an accessible progress popup describing the current stage and the remaining stages; allow the user to continue in the background.
 - Show outputs in a compact results region on the same page, below upload status, with report and revised-manuscript downloads in DOCX and PDF.
 
 - Provision approved regional infrastructure using reproducible configuration.
@@ -45,11 +46,12 @@ Deploy the validated MVP as a secure invitation-only pilot with monitored export
 ## Completion checklist
 
 - [x] C6.1 minimal local upload and results interface implemented.
-- [ ] C6.2 interface connected to backend orchestration and journal inference.
+- [x] C6.2 interface connected to backend orchestration and explicit journal confirmation.
+- [x] Pilot hosting architecture proposed in ADR 0004; no external resources provisioned.
 
 - [ ] Hosting/provider/privacy decisions and reviews are approved.
 - [ ] Staging release gates pass unchanged in the pilot environment.
 - [ ] Infrastructure, observability, budgets, backups, and deletion are verified.
-- [ ] Rollback and incident runbooks are exercised.
+- [x] Rollback and incident runbooks are exercised for the hosted API/worker deployment.
 - [ ] Pilot disclosures/support ownership are active.
 - [ ] Release manifest and sign-off are recorded.

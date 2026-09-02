@@ -3,15 +3,16 @@ import type { ReactNode } from 'react';
 import './styles.css';
 
 export const metadata: Metadata = {
-  title: 'Journal Matcher',
-  description: 'Prepare seu manuscrito para o padrão editorial da revista certa.',
+  title: 'Article Fit',
+  description:
+    'Prepare your manuscript for the editorial pattern of the right journal.',
 };
 
 export default function RootLayout({
   children,
 }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="pt-BR">
+    <html lang="en">
       <body>{children}</body>
     </html>
   );

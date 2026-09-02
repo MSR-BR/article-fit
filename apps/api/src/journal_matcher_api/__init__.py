@@ -1,3 +1,3 @@
-"""Journal Matcher HTTP API package."""
+"""Article Fit HTTP API package."""
 
 __version__ = "0.1.0"

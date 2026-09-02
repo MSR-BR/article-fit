@@ -1,11 +1,14 @@
 FROM python:3.13.14-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    MPLCONFIGDIR=/tmp/matplotlib \
+    XDG_CACHE_HOME=/tmp/cache
 
 WORKDIR /app
 RUN apt-get update && \
     apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends poppler-utils && \
     rm -rf /var/lib/apt/lists/*
 COPY pyproject.toml requirements.lock requirements-dev.lock README.md ./
 COPY apps ./apps

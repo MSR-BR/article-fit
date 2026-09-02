@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { GET } from './route';
 
 describe('web health route', () => {
-  it('returns the shared health contract without caching', async () => {
+  it('returns the stable health contract without caching', async () => {
     const response = GET();
 
     expect(response.headers.get('Cache-Control')).toBe('no-store');

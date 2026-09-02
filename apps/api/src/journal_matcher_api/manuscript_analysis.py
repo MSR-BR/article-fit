@@ -6,29 +6,51 @@ import hashlib
 import json
 import re
 import sqlite3
+import subprocess
+import tempfile
 import textwrap
 import uuid
+import xml.etree.ElementTree as ET
 import zipfile
 from collections.abc import Iterable
 from contextlib import closing
 from datetime import UTC, datetime
-from html import escape
+from html import escape, unescape
 from io import BytesIO
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
+from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Inches, Pt, RGBColor
 from fastapi import HTTPException
+from matplotlib.mathtext import math_to_image
+from pypdf import PdfReader
+from pypdf.errors import PdfReadError
 
 from journal_matcher_api.foundation import FoundationStore, Principal
 
 Decision = Literal["accepted", "rejected", "modified"]
 CATEGORY_COLORS = {
+    "scope-fit": "2F5597",
+    "literature-positioning": "7030A0",
+    "novelty-significance": "C00000",
+    "form": "1F4E79",
     "language": "1F4E79",
     "structure": "7030A0",
+    "content": "2F5597",
+    "scientific-question": "C00000",
+    "compliance": "C65911",
     "journal-format": "C65911",
     "methodology-reporting": "548235",
     "scientific-concern": "C00000",
     "unresolved": "666666",
+    "scientific-framing": "2F5597",
+    "theory-methodology": "548235",
+    "validation-robustness": "C00000",
+    "results-analysis": "2F5597",
+    "figures-equations": "7030A0",
+    "writing": "1F4E79",
 }
 
 
@@ -48,6 +70,21 @@ def now_iso() -> str:
 def stable_id(*parts: object) -> str:
     digest = hashlib.sha256(json.dumps(parts, sort_keys=True, default=str).encode()).hexdigest()
     return str(uuid.UUID(digest[:32]))
+
+
+def scope_analysis_records(
+    analysis_id: str, record_type: str, records: list[dict[str, object]]
+) -> list[dict[str, object]]:
+    """Give child records an analysis-scoped identity for safe cross-project reuse."""
+    scoped: list[dict[str, object]] = []
+    for record in records:
+        original_id = record.get("id")
+        if not isinstance(original_id, str) or not original_id:
+            raise HTTPException(status_code=422, detail=f"{record_type} record is missing an identity")
+        item = dict(record)
+        item["id"] = stable_id(analysis_id, record_type, original_id)
+        scoped.append(item)
+    return scoped
 
 
 def scientific_invariants(text: str) -> dict[str, list[str]]:
@@ -139,6 +176,7 @@ def build_recommendations(
     rules: list[dict[str, object]],
     anchor: str,
     manuscript_segments: list[dict[str, str]] | None = None,
+    journal_title: str = "the target journal",
 ) -> list[dict[str, object]]:
     folded = manuscript_text.casefold()
     prompt_like_upload = any(
@@ -211,7 +249,7 @@ def build_recommendations(
                     "journal-format",
                     "required",
                     f"The extracted core contains approximately {word_count} words; "
-                    f"PRL limits a Letter's core to {limit} words.",
+                    f"{journal_title} limits this manuscript type's core to {limit} words.",
                     "official-requirement",
                     source_ids,
                     "Reduce the core to the official limit; move specialist derivations to End Matter or "
@@ -325,8 +363,8 @@ def build_recommendations(
             "title-central-result",
             "language",
             "strongly-recommended",
-            "PRL asks titles to convey the most important and interesting result; the current title names "
-            "the method but not the central coherence result.",
+            f"{journal_title} expects the title to convey the most important result; the current title may not "
+            "foreground the central result.",
             "expert-suggestion",
             [],
             "Rewrite the title to foreground the demonstrated decomposition of coherence into heat and work; "
@@ -342,8 +380,8 @@ def build_recommendations(
             "abstract-concision",
             "language",
             "strongly-recommended",
-            f"The abstract contains approximately {abstract_words} words; PRL asks for a concise statement "
-            "of the principal result for a broad readership.",
+            f"The abstract contains approximately {abstract_words} words; {journal_title} expects a concise "
+            "statement of the principal result for its readership.",
             "expert-suggestion",
             [],
             "Compress background and repeated interpretation while retaining the problem, method, principal "
@@ -359,8 +397,8 @@ def build_recommendations(
             "introduction-broad-reader",
             "structure",
             "strongly-recommended",
-            f"The extracted Introduction is approximately {intro_words} words, which competes with the space "
-            "available for the central PRL result.",
+            f"The extracted Introduction is approximately {intro_words} words, which may compete with the "
+            f"space available for the central {journal_title} result.",
             "expert-suggestion",
             [],
             "Condense the field survey, identify the unresolved contradiction earlier, and state the paper's "
@@ -424,7 +462,7 @@ def build_recommendations(
             "scientific-limitations",
             "scientific-concern",
             "question",
-            "PRL readers need to know how general the claimed resolution of the quantum first-law inconsistency is.",
+            f"Readers of {journal_title} need to know how general the central claim is.",
             "expert-suggestion",
             [],
             "State the assumptions and boundaries explicitly: coupling/dynamical regime, differentiability, "
@@ -437,7 +475,7 @@ def build_recommendations(
             "conclusion-outlook",
             "structure",
             "optional",
-            "The official PRL guidance asks the conclusion to summarize results and point to future directions.",
+            f"The official {journal_title} guidance asks the conclusion to summarize results and point to future directions.",
             "expert-suggestion",
             [],
             "Add one restrained outlook sentence identifying the most consequential test or extension, "
@@ -448,15 +486,50 @@ def build_recommendations(
         )
     add(
         "scope-fit-author-review",
-        "unresolved",
+        "scope-fit",
         "question",
         "Scope fit requires scientific judgment and cannot be established from keyword overlap alone.",
         "expert-suggestion",
         [],
-        "Explain which PRL acceptance criterion is met and why the heat/work decomposition will influence "
-        "researchers beyond the immediate quantum-thermodynamics specialty.",
+        f"Explain which {journal_title} acceptance and scope expectations are met and why the result matters "
+        "beyond the immediate specialty.",
         True,
         original="" if prompt_like_upload else abstract[:400],
+    )
+    bibliography = re.split(r"\n\s*(?:references|bibliography)\b", manuscript_text, maxsplit=1, flags=re.I)
+    bibliography_text = bibliography[1] if len(bibliography) == 2 else ""
+    reference_entries = re.findall(r"(?m)^\s*(?:\[\d+\]|\d+[.)])\s+", bibliography_text)
+    add(
+        "literature-positioning-review",
+        "literature-positioning",
+        "question",
+        (
+            f"The deterministic extraction found approximately {len(reference_entries)} numbered bibliography "
+            "entries; topical coverage, close prior work, and novelty still require source-by-source review."
+            if bibliography_text
+            else "No reliably delimited References or Bibliography section was found in the extracted manuscript."
+        ),
+        "expert-suggestion",
+        [],
+        "Verify every central claim against the cited bibliography and recent literature; identify the closest "
+        "work explicitly, state the non-overlapping advance, add missing citations, and narrow any priority claim "
+        "that cannot be supported.",
+        True,
+        original=bibliography_text[:500],
+    )
+    add(
+        "novelty-significance-gate",
+        "novelty-significance",
+        "question",
+        "A journal-level novelty claim must distinguish a new result from a new presentation of known equations, "
+        "known limiting behavior, or a direct corollary of cited work.",
+        "expert-suggestion",
+        [],
+        "Write a one-sentence novelty claim naming the closest result, the exact technical difference, the new "
+        "evidence supplied here, and the consequence for a broader physics audience. List claims that should be "
+        "avoided because the literature already supports them.",
+        True,
+        original="" if prompt_like_upload else abstract[:500],
     )
     return recommendations
 
@@ -511,6 +584,8 @@ class AnalysisRepository:
         limitations: list[str],
     ) -> dict[str, object]:
         analysis_id = stable_id(principal.workspace_id, project_id, profile_version_id, manuscript_hash)
+        scoped_rules = scope_analysis_records(analysis_id, "guide-rule", rules)
+        scoped_recommendations = scope_analysis_records(analysis_id, "recommendation", recommendations)
         with closing(sqlite3.connect(self.database_path)) as connection, connection:
             existing = connection.execute("SELECT id FROM analysis_runs WHERE id = ?", (analysis_id,)).fetchone()
             if not existing:
@@ -529,11 +604,14 @@ class AnalysisRepository:
                 )
                 connection.executemany(
                     "INSERT INTO guide_rules VALUES (?, ?, ?)",
-                    [(str(rule["id"]), analysis_id, json.dumps(rule, sort_keys=True)) for rule in rules],
+                    [(str(rule["id"]), analysis_id, json.dumps(rule, sort_keys=True)) for rule in scoped_rules],
                 )
                 connection.executemany(
                     "INSERT INTO recommendations VALUES (?, ?, ?)",
-                    [(str(item["id"]), analysis_id, json.dumps(item, sort_keys=True)) for item in recommendations],
+                    [
+                        (str(item["id"]), analysis_id, json.dumps(item, sort_keys=True))
+                        for item in scoped_recommendations
+                    ],
                 )
         return self.get(principal, analysis_id)
 
@@ -584,6 +662,39 @@ class AnalysisRepository:
             "createdAt": run["created_at"],
         }
 
+    def latest_for_project(self, principal: Principal, project_id: str) -> dict[str, object]:
+        with closing(sqlite3.connect(self.database_path)) as connection:
+            row = connection.execute(
+                "SELECT id FROM analysis_runs WHERE project_id = ? AND workspace_id = ? "
+                "ORDER BY created_at DESC LIMIT 1",
+                (project_id, principal.workspace_id),
+            ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Analysis not found")
+        return self.get(principal, str(row[0]))
+
+    def add_ai_review(
+        self,
+        principal: Principal,
+        analysis_id: str,
+        recommendations: list[dict[str, object]],
+        limitations: list[str],
+    ) -> dict[str, object]:
+        """Append an idempotent AI review to an existing workspace-scoped analysis."""
+        analysis = self.get(principal, analysis_id)
+        merged_limitations = list(dict.fromkeys([*analysis["limitations"], *limitations]))  # type: ignore[misc]
+        scoped_recommendations = scope_analysis_records(analysis_id, "recommendation", recommendations)
+        with closing(sqlite3.connect(self.database_path)) as connection, connection:
+            connection.executemany(
+                "INSERT OR IGNORE INTO recommendations VALUES (?, ?, ?)",
+                [(str(item["id"]), analysis_id, json.dumps(item, sort_keys=True)) for item in scoped_recommendations],
+            )
+            connection.execute(
+                "UPDATE analysis_runs SET limitations_json = ? WHERE id = ? AND workspace_id = ?",
+                (json.dumps(merged_limitations), analysis_id, principal.workspace_id),
+            )
+        return self.get(principal, analysis_id)
+
     def decide(
         self,
         principal: Principal,
@@ -628,6 +739,166 @@ class AnalysisRepository:
         return str(row[0])
 
 
+LATEX_PATTERN = re.compile(r"\$\$(.+?)\$\$|\\\[(.+?)\\\]|\\\((.+?)\\\)|\$(.+?)\$", re.S)
+
+
+def _latex_parts(value: object) -> tuple[str, list[str]]:
+    text = str(value or "")
+    expressions: list[str] = []
+
+    def replace(match: re.Match[str]) -> str:
+        expression = next((group for group in match.groups() if group is not None), "").strip()
+        if expression:
+            expressions.append(expression)
+            return " [equation rendered below] "
+        return ""
+
+    visible = LATEX_PATTERN.sub(replace, text)
+    if (
+        not expressions
+        and "\\" in text
+        and any(token in text for token in ("\\frac", "\\left", "\\right", "\\langle", "\\partial", "\\sum"))
+    ):
+        expressions.append(text.strip())
+        visible = "[equation rendered below]"
+    return " ".join(visible.split()), expressions
+
+
+def _math_png(expression: str, *, color: str = "#1f4e79") -> BytesIO | None:
+    value = expression.strip().replace("\n", " ")
+    if not value or len(value) > 2_000:
+        return None
+    output = BytesIO()
+    try:
+        math_to_image(f"${value}$", output, dpi=180, format="png", color=color)
+    except (ValueError, RuntimeError):
+        return None
+    output.seek(0)
+    return output
+
+
+def _add_review_value(document: Any, label: str, value: object, *, blue: bool = False) -> None:
+    heading = document.add_paragraph()
+    heading.paragraph_format.space_before = Pt(7)
+    heading.paragraph_format.space_after = Pt(2)
+    label_run = heading.add_run(label.upper())
+    label_run.bold = True
+    label_run.font.size = Pt(8)
+    label_run.font.color.rgb = RGBColor(95, 102, 105)
+    visible, expressions = _latex_parts(value)
+    paragraph = document.add_paragraph()
+    paragraph.paragraph_format.space_after = Pt(5)
+    run = paragraph.add_run(visible or "—")
+    run.font.size = Pt(10)
+    run.font.color.rgb = RGBColor(31, 78, 121) if blue else RGBColor(0, 0, 0)
+    for expression in expressions:
+        image = _math_png(expression)
+        if image is not None:
+            equation = document.add_paragraph()
+            equation.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            equation.add_run().add_picture(image, width=Inches(5.8))
+
+
+def _add_suggestion_page(document: Any, title: str, items: list[dict[str, object]]) -> None:
+    title_paragraph = document.add_paragraph()
+    title_run = title_paragraph.add_run(title)
+    title_run.bold = True
+    title_run.font.size = Pt(18)
+    title_run.font.color.rgb = RGBColor(11, 63, 92)
+    notice = document.add_paragraph(
+        "The preceding page is the unchanged original manuscript. Suggestions on this page are color-coded blue; "
+        "scientific changes require author validation."
+    )
+    notice.runs[0].italic = True
+    notice.runs[0].font.color.rgb = RGBColor(95, 102, 105)
+    for index, item in enumerate(items, 1):
+        heading = document.add_paragraph()
+        heading.paragraph_format.space_before = Pt(12)
+        dimension = str(item.get("reviewDimension") or item.get("category") or "Editorial review")
+        run = heading.add_run(f"{index}. {dimension.replace('-', ' ').title()}")
+        run.bold = True
+        run.font.size = Pt(13)
+        run.font.color.rgb = RGBColor(31, 78, 121)
+        _add_review_value(document, "Current manuscript", item.get("originalText"))
+        _add_review_value(
+            document,
+            "Journal/reference pattern",
+            item.get("referencePattern") or item.get("journalExpectation") or item.get("basis"),
+        )
+        _add_review_value(document, "Why this matters", item.get("rationale"))
+        _add_review_value(
+            document,
+            "Author action",
+            item.get("authorAction") or item.get("proposedText") or item.get("rationale"),
+            blue=True,
+        )
+        if item.get("proposedText"):
+            _add_review_value(document, "Suggested wording", item.get("proposedText"), blue=True)
+        if item.get("scientificImpact") or item.get("authorValidationRequired"):
+            warning = document.add_paragraph("Author validation required before this scientific change is adopted.")
+            warning.runs[0].bold = True
+            warning.runs[0].font.color.rgb = RGBColor(176, 31, 31)
+
+
+def create_pdf_visual_review_docx(original_pdf: bytes, recommendations: list[dict[str, object]]) -> bytes:
+    """Preserve a PDF manuscript as source-page images and interleave readable blue review pages."""
+    try:
+        reader = PdfReader(BytesIO(original_pdf), strict=False)
+    except PdfReadError as error:
+        raise HTTPException(status_code=422, detail="Original PDF cannot be rendered safely") from error
+    if not reader.pages:
+        raise HTTPException(status_code=422, detail="Original PDF contains no pages")
+    visible = [item for item in recommendations if item.get("decision") != "rejected"]
+    by_page: dict[int, list[dict[str, object]]] = {}
+    unanchored: list[dict[str, object]] = []
+    for item in visible:
+        match = re.fullmatch(r"page:(\d+)", str(item.get("anchor", "")))
+        if match and 1 <= int(match.group(1)) <= len(reader.pages):
+            by_page.setdefault(int(match.group(1)), []).append(item)
+        else:
+            unanchored.append(item)
+    document = Document()
+    section = document.sections[0]
+    section.top_margin = Inches(0.32)
+    section.bottom_margin = Inches(0.32)
+    section.left_margin = Inches(0.35)
+    section.right_margin = Inches(0.35)
+    with tempfile.TemporaryDirectory(prefix="article-fit-pdf-") as folder:
+        source_path = Path(folder) / "source.pdf"
+        source_path.write_bytes(original_pdf)
+        prefix = Path(folder) / "page"
+        try:
+            subprocess.run(
+                ["pdftoppm", "-jpeg", "-r", "150", "-jpegopt", "quality=88", str(source_path), str(prefix)],
+                check=True,
+                capture_output=True,
+                timeout=120,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            raise HTTPException(status_code=500, detail="PDF source pages could not be rendered") from error
+        pages = sorted(Path(folder).glob("page-*.jpg"))
+        if len(pages) != len(reader.pages):
+            raise HTTPException(status_code=500, detail="PDF source-page rendering was incomplete")
+        for page_number, image_path in enumerate(pages, 1):
+            paragraph = document.add_paragraph()
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            paragraph.paragraph_format.space_after = Pt(0)
+            paragraph.add_run().add_picture(str(image_path), width=Inches(7.75))
+            document.add_page_break()  # type: ignore[no-untyped-call]
+            if by_page.get(page_number):
+                _add_suggestion_page(
+                    document,
+                    f"Article Fit suggestions for source page {page_number}",
+                    by_page[page_number],
+                )
+                document.add_page_break()  # type: ignore[no-untyped-call]
+        if unanchored:
+            _add_suggestion_page(document, "Article Fit manuscript-level suggestions", unanchored)
+    output = BytesIO()
+    document.save(output)
+    return output.getvalue()
+
+
 def create_docx(text: str, recommendations: list[dict[str, object]], reconstructed: bool) -> bytes:
     paragraphs = [part.strip() for part in text.splitlines() if part.strip()] or ["No extractable manuscript text."]
     section_names = {"abstract", "introduction", "methods", "results", "discussion", "conclusion", "references"}
@@ -636,15 +907,21 @@ def create_docx(text: str, recommendations: list[dict[str, object]], reconstruct
         style = "Title" if index == 0 else "Heading1" if part.casefold().rstrip(":") in section_names else "Normal"
         body_parts.append(_word_paragraph(part, style=style))
     body = "".join(body_parts)
-    notice = "Reconstructed from PDF; layout fidelity is not guaranteed." if reconstructed else "Annotated review copy."
+    notice = (
+        "PDF-source review copy: the original editable Word template cannot be recovered from a PDF. "
+        "Use the revised PDF for exact visual fidelity."
+        if reconstructed
+        else "Article Fit review copy. Original manuscript text remains black."
+    )
     body += _word_paragraph(notice, color="C00000", bold=True)
-    accepted = [item for item in recommendations if item.get("decision") in {"accepted", "modified"}]
-    if accepted:
-        body += _word_paragraph("Accepted and modified revision notes", color="2E74B5", bold=True, style="Heading1")
-    for item in accepted:
+    visible = [item for item in recommendations if item.get("decision") != "rejected"]
+    if visible:
+        body += _word_paragraph("Color-coded editorial suggestions", color="2E74B5", bold=True, style="Heading1")
+    for item in visible:
         proposed = item.get("modifiedText") or item.get("proposedText") or item.get("rationale")
         body += _word_paragraph(
-            f"[{item['category']}] {item['anchor']}: {proposed}", color=CATEGORY_COLORS[str(item["category"])]
+            f"ARTICLE FIT SUGGESTION [{item['category']}] {item['anchor']}: {proposed}",
+            color=CATEGORY_COLORS.get(str(item["category"]), "1F4E79"),
         )
     document = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -693,8 +970,39 @@ def create_docx(text: str, recommendations: list[dict[str, object]], reconstruct
     return output.getvalue()
 
 
+def _word_suggestion_block(item: dict[str, object]) -> str:
+    category = str(item.get("reviewDimension") or item.get("category") or "editorial review")
+    color = CATEGORY_COLORS.get(str(item.get("category")), "1F4E79")
+    original, _ = _latex_parts(item.get("originalText"))
+    pattern, _ = _latex_parts(item.get("referencePattern") or item.get("journalExpectation") or item.get("basis"))
+    rationale, _ = _latex_parts(item.get("rationale"))
+    action, _ = _latex_parts(item.get("authorAction") or item.get("proposedText") or item.get("rationale"))
+    proposed, _ = _latex_parts(item.get("modifiedText") or item.get("proposedText"))
+    parts = [
+        _word_paragraph(f"ARTICLE FIT — {category.replace('-', ' ').upper()}", color=color, bold=True),
+    ]
+    if original:
+        parts.append(_word_paragraph(f"CURRENT MANUSCRIPT: {original}", color="000000"))
+    if pattern:
+        parts.append(_word_paragraph(f"JOURNAL/REFERENCE PATTERN: {pattern}", color="666666"))
+    if rationale:
+        parts.append(_word_paragraph(f"WHY THIS MATTERS: {rationale}", color="000000"))
+    parts.append(_word_paragraph(f"AUTHOR ACTION: {action}", color=color, bold=True))
+    if proposed:
+        parts.append(_word_paragraph(f"SUGGESTED WORDING: {proposed}", color=color))
+    if item.get("scientificImpact") or item.get("authorValidationRequired"):
+        parts.append(
+            _word_paragraph(
+                "AUTHOR VALIDATION REQUIRED BEFORE ADOPTING THIS SCIENTIFIC CHANGE.",
+                color="C00000",
+                bold=True,
+            )
+        )
+    return "".join(parts)
+
+
 def annotate_docx(original: bytes, recommendations: list[dict[str, object]]) -> bytes:
-    """Preserve an uploaded DOCX package and append color-coded author-approved notes."""
+    """Preserve an uploaded DOCX package and add color-coded suggestions near their anchors."""
     try:
         with zipfile.ZipFile(BytesIO(original)) as source:
             document = source.read("word/document.xml").decode("utf-8")
@@ -702,23 +1010,41 @@ def annotate_docx(original: bytes, recommendations: list[dict[str, object]]) -> 
     except (zipfile.BadZipFile, KeyError, UnicodeDecodeError) as error:
         raise HTTPException(status_code=422, detail="Original DOCX cannot be safely annotated") from error
 
-    notes = _word_paragraph("Journal Matcher — accepted and modified revision notes", color="2E74B5", bold=True)
-    for item in recommendations:
-        if item.get("decision") not in {"accepted", "modified"}:
-            continue
-        proposed = item.get("modifiedText") or item.get("proposedText") or item.get("rationale")
-        notes += _word_paragraph(
-            f"[{item['category']}] {item['anchor']}: {proposed}", color=CATEGORY_COLORS[str(item["category"])]
-        )
+    visible = [item for item in recommendations if item.get("decision") != "rejected"]
+    anchored: dict[int, list[dict[str, object]]] = {}
+    unanchored: list[dict[str, object]] = []
+    for item in visible:
+        match = re.fullmatch(r"paragraph:(\d+)", str(item.get("anchor", "")))
+        if match:
+            anchored.setdefault(int(match.group(1)), []).append(item)
+        else:
+            unanchored.append(item)
+
+    paragraph_pattern = re.compile(r"<w:p(?:\s[^>]*)?>.*?</w:p>", re.S)
+    rebuilt: list[str] = []
+    cursor = 0
+    logical_index = 0
+    for match in paragraph_pattern.finditer(document):
+        rebuilt.append(document[cursor : match.end()])
+        cursor = match.end()
+        if re.search(r"<w:t(?:\s[^>]*)?>.*?</w:t>", match.group(0), re.S):
+            logical_index += 1
+            for item in anchored.get(logical_index, []):
+                rebuilt.append(_word_suggestion_block(item))
+    rebuilt.append(document[cursor:])
+    document = "".join(rebuilt)
+
+    notes = ""
+    if unanchored:
+        notes += _word_paragraph("Article Fit — manuscript-level suggestions", color="2E74B5", bold=True)
+    for item in unanchored:
+        notes += _word_suggestion_block(item)
     insertion = document.rfind("<w:sectPr")
     if insertion < 0:
         insertion = document.rfind("</w:body>")
     if insertion < 0:
         raise HTTPException(status_code=422, detail="Original DOCX body cannot be located")
     entries["word/document.xml"] = (document[:insertion] + notes + document[insertion:]).encode()
-    for name, content in list(entries.items()):
-        if name.startswith("word/") and name.endswith(".xml"):
-            entries[name] = re.sub(rb"\s+w:rsid[A-Za-z]*=\"[^\"]*\"", b"", content)
     core = entries.get("docProps/core.xml")
     if core is not None:
         core = re.sub(rb"(<dc:creator[^>]*>).*?(</dc:creator>)", rb"\1\2", core, flags=re.S)
@@ -739,7 +1065,31 @@ def annotate_docx(original: bytes, recommendations: list[dict[str, object]]) -> 
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as target:
         for name, content in entries.items():
             target.writestr(name, content)
-    return output.getvalue()
+    annotated = output.getvalue()
+    rendered_equations: list[tuple[str, str]] = []
+    for item in visible:
+        proposed = item.get("modifiedText") or item.get("proposedText") or item.get("rationale")
+        _, expressions = _latex_parts(proposed)
+        rendered_equations.extend((str(item.get("anchor", "document")), expression) for expression in expressions)
+    if not rendered_equations:
+        return annotated
+    document_with_math = Document(BytesIO(annotated))
+    heading = document_with_math.add_paragraph()
+    run = heading.add_run("Article Fit — rendered equations in suggested revisions")
+    run.bold = True
+    run.font.color.rgb = RGBColor(31, 78, 121)
+    for anchor, expression in rendered_equations:
+        image = _math_png(expression)
+        if image is None:
+            continue
+        paragraph = document_with_math.add_paragraph(anchor)
+        paragraph.runs[0].font.color.rgb = RGBColor(95, 102, 105)
+        equation = document_with_math.add_paragraph()
+        equation.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        equation.add_run().add_picture(image, width=Inches(5.8))
+    rendered = BytesIO()
+    document_with_math.save(rendered)
+    return rendered.getvalue()
 
 
 def validate_invariant_preservation(original: str, revised: str) -> None:
@@ -753,24 +1103,57 @@ def validate_invariant_preservation(original: str, revised: str) -> None:
 
 
 def validate_proposal_parity(docx: bytes, revised_pdf: bytes, recommendations: list[dict[str, object]]) -> None:
-    """Require each accepted/modified proposal to be visible in both revision formats."""
+    """Require each visible proposal to be represented in both revision formats."""
     with zipfile.ZipFile(BytesIO(docx)) as archive:
         docx_xml = archive.read("word/document.xml").decode("utf-8", errors="ignore")
-    pdf_text = revised_pdf.decode("latin-1", errors="ignore")
+    try:
+        root = ET.fromstring(docx_xml)
+        docx_text = " ".join(node.text or "" for node in root.iter() if node.tag.endswith("}t"))
+    except ET.ParseError:
+        docx_text = unescape(re.sub(r"<[^>]+>", " ", docx_xml))
+    try:
+        pdf_text = " ".join(page.extract_text() or "" for page in PdfReader(BytesIO(revised_pdf), strict=False).pages)
+    except (PdfReadError, ValueError, TypeError) as error:
+        raise HTTPException(status_code=500, detail="Revised PDF cannot be read") from error
+    normalized_docx = " ".join(docx_text.split())
+    normalized_pdf = " ".join(pdf_text.split())
     for item in recommendations:
-        if item.get("decision") not in {"accepted", "modified"}:
+        if item.get("decision") == "rejected":
             continue
-        proposal = str(item.get("modifiedText") or item.get("proposedText") or item.get("rationale"))
-        if escape(proposal) not in docx_xml or _pdf_escape(proposal) not in pdf_text:
+        candidates = [
+            str(value)
+            for value in (
+                item.get("authorAction"),
+                item.get("modifiedText"),
+                item.get("proposedText"),
+                item.get("rationale"),
+            )
+            if value
+        ]
+        probes = [" ".join(candidate.split())[:80] for candidate in candidates]
+        if not any(probe in normalized_docx and probe in normalized_pdf for probe in probes):
             raise HTTPException(status_code=500, detail="DOCX/PDF recommendation parity validation failed")
 
 
 def _word_paragraph(text: str, color: str = "000000", bold: bool = False, style: str = "Normal") -> str:
+    text = _sanitize_xml_text(text)
     bold_xml = "<w:b/>" if bold else ""
     return (
         f'<w:p><w:pPr><w:pStyle w:val="{style}"/></w:pPr><w:r><w:rPr>'
         f'<w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/><w:color w:val="{color}"/>{bold_xml}'
         f'</w:rPr><w:t xml:space="preserve">{escape(text)}</w:t></w:r></w:p>'
+    )
+
+
+def _sanitize_xml_text(value: object) -> str:
+    text = str(value or "")
+    return "".join(
+        character
+        for character in text
+        if character in "\t\n\r"
+        or 0x20 <= ord(character) <= 0xD7FF
+        or 0xE000 <= ord(character) <= 0xFFFD
+        or 0x10000 <= ord(character) <= 0x10FFFF
     )
 
 
@@ -817,20 +1200,25 @@ def _pdf_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
 
-def validate_artifacts(docx: bytes, revised_pdf: bytes, report_pdf: bytes, manifest: bytes) -> dict[str, object]:
+def validate_artifacts(docx: bytes, revised_pdf: bytes, report_pdf: bytes) -> dict[str, object]:
     try:
         with zipfile.ZipFile(BytesIO(docx)) as archive:
             document_xml = archive.read("word/document.xml")
-    except (zipfile.BadZipFile, KeyError) as error:
+            ET.fromstring(document_xml)
+    except (zipfile.BadZipFile, KeyError, ET.ParseError) as error:
         raise HTTPException(status_code=500, detail="Generated DOCX failed structural validation") from error
-    if not revised_pdf.startswith(b"%PDF-") or not report_pdf.startswith(b"%PDF-"):
-        raise HTTPException(status_code=500, detail="Generated PDF failed structural validation")
-    parsed = json.loads(manifest)
+    try:
+        revised_reader = PdfReader(BytesIO(revised_pdf), strict=False)
+        report_reader = PdfReader(BytesIO(report_pdf), strict=False)
+        if not revised_reader.pages or not report_reader.pages:
+            raise ValueError("empty PDF")
+    except (PdfReadError, ValueError, TypeError):
+        raise HTTPException(status_code=500, detail="Generated PDF failed structural validation") from None
     forbidden = (b"Bearer ", b"local-invite-token", b"/tmp/journal-matcher")
-    combined = document_xml + revised_pdf + report_pdf + manifest
+    combined = document_xml + revised_pdf + report_pdf
     if any(secret in combined for secret in forbidden):
         raise HTTPException(status_code=500, detail="Artifact privacy validation failed")
-    return {"structural": True, "privacy": True, "manifestSchema": parsed.get("schemaVersion") == "1.0"}
+    return {"structural": True, "privacy": True, "sourceStructurePreserved": True}
 
 
 def store_artifact_set(
