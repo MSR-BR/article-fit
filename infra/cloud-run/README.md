@@ -14,7 +14,7 @@ storage remains in the existing Supabase project. API and worker use separate le
 ## Secret boundary
 
 Create Secret Manager entries for `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY`,
-`RESEARCH_STARTER_API_KEY`, and `JOURNAL_MATCHER_INVITE_TOKEN`. Inject them at runtime; never put values in
+`RESEARCH_STARTER_ARTICLE_FIT_API_KEY`, and `JOURNAL_MATCHER_INVITE_TOKEN`. The legacy `RESEARCH_STARTER_API_KEY` remains a temporary fallback during migration. Inject them at runtime; never put values in
 these manifests, build arguments, image layers, logs, Vercel browser variables, or Git.
 
 The non-secret `SUPABASE_URL`, web origin, provider contact, and Research Starter base URL may be ordinary
@@ -42,3 +42,5 @@ isolation, artifact download, deletion, and synthetic end-to-end tests pass.
 - API service scaling: minimum zero (default), maximum one, concurrency four, timeout 300 seconds.
 - Rollback target: retained API revision `article-fit-api-00037-xiw`.
 - Access: the public MVP has no end-user login; Vercel supplies the server-only credential and direct unauthenticated API access remains blocked.
+
+Verify Research Starter credential rotations with `GET https://researchstarter.vercel.app/api/v1/auth-check` before removing the previous key.

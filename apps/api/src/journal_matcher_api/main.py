@@ -975,7 +975,7 @@ async def discover_with_research_starter(
 ) -> dict[str, object]:
     store.get_project(principal, project_id)
     base_url = os.getenv("RESEARCH_STARTER_BASE_URL")
-    api_key = os.getenv("RESEARCH_STARTER_API_KEY")
+    api_key = (os.getenv("RESEARCH_STARTER_ARTICLE_FIT_API_KEY") or os.getenv("RESEARCH_STARTER_API_KEY"))
     if not base_url or not api_key:
         raise HTTPException(status_code=503, detail="Research Starter is not configured")
     result = ResearchStarterClient(base_url, api_key).report(
@@ -1095,7 +1095,7 @@ async def _create_ai_review(
     literature = manuscript_reference_evidence(literature_context)
     review_limitations = list(literature_context.limitations)
     base_url = os.getenv("RESEARCH_STARTER_BASE_URL")
-    research_key = os.getenv("RESEARCH_STARTER_API_KEY")
+    research_key = (os.getenv("RESEARCH_STARTER_ARTICLE_FIT_API_KEY") or os.getenv("RESEARCH_STARTER_API_KEY"))
     if base_url and research_key and literature_context.topic:
         try:
             research_topic = f"{article_type} article editorial context: {literature_context.topic}"
